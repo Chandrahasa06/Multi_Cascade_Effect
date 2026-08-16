@@ -20,9 +20,13 @@ from crewai import Crew, Process
 from agents import build_llm, build_agents
 from tasks import build_tasks
 from detector import grounding_check
+from trust import assess_trust
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# Simple in-memory trust store keyed by agent name across runs in this process
+TRUST_STORE: dict = {}
 
 
 def run_pipeline(inject_attack: bool, run_name: str) -> dict:
@@ -61,6 +65,16 @@ def run_pipeline(inject_attack: bool, run_name: str) -> dict:
     result["grounding_check"] = grounding_check(
         result["forecast_output"], result["topology_output"]
     )
+
+    # --- Tier-1 trust assessment (Forecast Agent) ---
+    history = TRUST_STORE.setdefault("forecast_agent", {})
+    prev_trust = history.get("last_trust", 0.5)
+    trust_result = assess_trust(
+        result["forecast_output"], result["topology_output"], history, prev_trust=prev_trust
+    )
+    # persist updated trust
+    history["last_trust"] = trust_result["TrustScore_t"]
+    result["trust"] = trust_result
 
     log_path = os.path.join(LOG_DIR, f"{run_name}.json")
     with open(log_path, "w") as f:
