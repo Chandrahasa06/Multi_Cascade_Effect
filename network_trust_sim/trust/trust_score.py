@@ -11,11 +11,13 @@ from config import (
     W_GROUNDING,
     W_ENTAILMENT,
     W_BEHAVIOR,
+    W_POLICY,
     ESCALATION_THRESHOLD,
     LAMBDA_DECAY,
     FLAG_THRESHOLD,
     TURN_FLAG_THRESHOLD,
 )
+from trust.policy_rules import policy_alignment
 
 
 class TrustScoreEngine:
@@ -25,22 +27,41 @@ class TrustScoreEngine:
         self.behavior_tracker = behavior_tracker
         self.trust_history = {}  # agent_id -> last TrustScore
 
-    def tier1(self, agent_id, source_text, decision):
+    def tier1(self, agent_id, source_text, decision, telemetry: dict):
         grounding = self.grounding_checker.check(source_text, decision.get("claims", []))
         entailment = self.entailment_checker.check(
             decision.get("claims", []), decision.get("action", ""), decision.get("justification", "")
         )
         behavior = self.behavior_tracker.score(agent_id, decision)
+        policy = policy_alignment(telemetry, decision.get("action", ""))
 
         s1 = (
             W_GROUNDING * grounding["grounding_rate"]
             + W_ENTAILMENT * entailment["score"]
             + W_BEHAVIOR * (1 - behavior["behavior_deviation"])
+            + W_POLICY * policy
         )
-        return s1, {"grounding": grounding, "entailment": entailment, "behavior": behavior}
 
-    def evaluate(self, agent_id, source_text, decision, consistency_checker=None, telemetry_text=None):
-        s1, detail = self.tier1(agent_id, source_text, decision)
+        # Hard overrides: certain signals shouldn't be diluted by averaging.
+        if entailment.get("verdict") == "contradicted":
+            s1 = min(s1, 0.15)
+        elif entailment.get("verdict") == "unsupported_leap":
+            s1 = min(s1, 0.5)  # softer cap -- a real gap, but less certain than an outright contradiction
+        if policy == 0.0:
+            # A hard policy violation (e.g. no_action_required during a critical
+            # reading) is a deterministic, unambiguous fault -- an LLM judge being
+            # persuaded the claims are fine shouldn't be able to average this away.
+            s1 = min(s1, 0.3)
+
+        return s1, {
+            "grounding": grounding,
+            "entailment": entailment,
+            "behavior": behavior,
+            "policy_alignment": policy,
+        }
+
+    def evaluate(self, agent_id, source_text, decision, telemetry, consistency_checker=None, telemetry_text=None):
+        s1, detail = self.tier1(agent_id, source_text, decision, telemetry)
 
         escalated = s1 < ESCALATION_THRESHOLD
         consistency = None

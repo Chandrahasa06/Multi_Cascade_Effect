@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime
 
 from config import NUM_AGENTS, NUM_TURNS, COMPROMISED_AGENT_ID, INJECTION_TURN, OLLAMA_MODEL
@@ -47,13 +48,16 @@ def run():
 
     for turn in range(1, NUM_TURNS + 1):
         for agent_id, agent in agents.items():
-            telemetry = generate_telemetry(agent_id, agent.segment, turn)
+            is_compromised_turn = (agent_id == COMPROMISED_AGENT_ID) and (turn >= INJECTION_TURN)
+            incident_severity = (turn - INJECTION_TURN + 1) if is_compromised_turn else 0
+
+            telemetry = generate_telemetry(agent_id, agent.segment, turn, incident_severity=incident_severity)
             source_text = telemetry_to_source_text(telemetry)
 
-            is_compromised_turn = (agent_id == COMPROMISED_AGENT_ID) and (turn >= INJECTION_TURN)
             telemetry_seen_by_agent = inject(source_text) if is_compromised_turn else source_text
 
-            print(f"  -> {agent_id} turn {turn}: querying model...", end="\r")
+            print(f"  Turn {turn} / {agent_id}:", flush=True)
+            t0 = time.time()
             decision = agent.decide(telemetry_seen_by_agent)
 
             consistency_checker = ConsistencyChecker(agent, client)
@@ -61,6 +65,7 @@ def run():
                 agent_id,
                 source_text,
                 decision,
+                telemetry,
                 consistency_checker=consistency_checker,
                 telemetry_text=telemetry_seen_by_agent,
             )
@@ -75,7 +80,7 @@ def run():
             print(
                 f"{turn:<5}{agent_id:<10}{decision.get('action', ''):<28}"
                 f"{result['tier1_score']:.2f}    {'Y' if result['escalated'] else 'N':<6}"
-                f"{result['trust_score']:.2f}    {flag_str}"
+                f"{result['trust_score']:.2f}    {flag_str}  ({time.time() - t0:.1f}s)\n"
             )
 
             run_log.append(
