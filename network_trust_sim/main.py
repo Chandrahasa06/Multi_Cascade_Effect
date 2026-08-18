@@ -56,7 +56,6 @@ def run():
 
             telemetry_seen_by_agent = inject(source_text) if is_compromised_turn else source_text
 
-            print(f"  Turn {turn} / {agent_id}:", flush=True)
             t0 = time.time()
             decision = agent.decide(telemetry_seen_by_agent)
 
@@ -80,7 +79,8 @@ def run():
             print(
                 f"{turn:<5}{agent_id:<10}{decision.get('action', ''):<28}"
                 f"{result['tier1_score']:.2f}    {'Y' if result['escalated'] else 'N':<6}"
-                f"{result['trust_score']:.2f}    {flag_str}  ({time.time() - t0:.1f}s)\n"
+                f"{result['trust_score']:.2f}    {flag_str}  ({time.time() - t0:.1f}s)",
+                flush=True
             )
 
             run_log.append(
