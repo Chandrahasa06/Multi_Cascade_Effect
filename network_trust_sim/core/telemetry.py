@@ -38,6 +38,7 @@ def generate_telemetry(agent_id: str, segment: str, turn: int, incident_severity
         base_util = min(97, 72 + incident_severity * 6)
         error_rate = min(1.5, 0.25 + incident_severity * 0.15)
         packet_loss = min(3.0, 0.4 + incident_severity * 0.2)
+        latency = min(60, 14 + incident_severity * 4)  # incidents now actually raise latency too
 
     util = round(base_util + random.uniform(-3, 3), 1)
     return {

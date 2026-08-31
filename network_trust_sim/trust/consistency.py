@@ -33,9 +33,9 @@ class ConsistencyChecker:
         self.agent = agent
         self.client = client or agent.client
 
-    def run(self, telemetry_text: str) -> dict:
+    def run(self, telemetry_text: str, neighbor_context: str = None) -> dict:
         samples = [
-            self.agent.decide(telemetry_text, temperature=0.9)
+            self.agent.decide(telemetry_text, temperature=0.9, neighbor_context=neighbor_context)
             for _ in range(CONSISTENCY_RESAMPLES)
         ]
 

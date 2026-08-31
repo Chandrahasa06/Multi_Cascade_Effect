@@ -60,13 +60,16 @@ class TrustScoreEngine:
             "policy_alignment": policy,
         }
 
-    def evaluate(self, agent_id, source_text, decision, telemetry, consistency_checker=None, telemetry_text=None):
+    def evaluate(
+        self, agent_id, source_text, decision, telemetry,
+        consistency_checker=None, telemetry_text=None, neighbor_context=None,
+    ):
         s1, detail = self.tier1(agent_id, source_text, decision, telemetry)
 
         escalated = s1 < ESCALATION_THRESHOLD
         consistency = None
         if escalated and consistency_checker is not None:
-            consistency = consistency_checker.run(telemetry_text)
+            consistency = consistency_checker.run(telemetry_text, neighbor_context=neighbor_context)
             s_final = s1 * consistency["consistency_score"]  # can only lower s1, never raise it
         else:
             s_final = s1
