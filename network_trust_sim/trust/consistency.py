@@ -29,13 +29,22 @@ def _jaccard(claims_a, claims_b):
 
 
 class ConsistencyChecker:
-    def __init__(self, agent, client=None):
+    def __init__(self, agent, client=None, adversarial: bool = False):
         self.agent = agent
         self.client = client or agent.client
+        # Whether THIS agent-turn is under the adversarial system-prompt
+        # variant (set by the coordinator, which owns the fault schedule).
+        # Resampling has to faithfully replay the same agent-turn it's
+        # checking, not a "clean" version of it -- exactly how the original
+        # pipeline resampled using telemetry_text that may already have been
+        # injected, rather than the clean source_text.
+        self.adversarial = adversarial
 
-    def run(self, telemetry_text: str, neighbor_context: str = None) -> dict:
+    def run(self, telemetry_text: str, peer_context=None) -> dict:
         samples = [
-            self.agent.decide(telemetry_text, temperature=0.9, neighbor_context=neighbor_context)
+            self.agent.decide(
+                telemetry_text, temperature=0.9, peer_context=peer_context, adversarial=self.adversarial
+            )
             for _ in range(CONSISTENCY_RESAMPLES)
         ]
 

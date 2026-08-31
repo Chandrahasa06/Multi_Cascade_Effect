@@ -47,10 +47,14 @@ class BehaviorTracker:
             "z_confidence": z_conf,
         }
 
-    def update(self, agent_id: str, decision: dict):
-        """Grow the rolling baseline. Called every turn after scoring; a genuinely
-        compromised turn will nudge the baseline slightly, which is a known
-        trade-off of an adaptive baseline -- see README for mitigation options."""
+    def update(self, agent_id: str, decision: dict, skip: bool = False):
+        """Grow the rolling baseline. `skip=True` (the turn was flagged)
+        freezes the baseline instead of updating it, so a sustained
+        compromise can't slowly drag "normal" toward itself -- this is the
+        adaptive-baseline-leakage fix the README previously listed as a known
+        limitation."""
+        if skip:
+            return
         h = self._get(agent_id)
         h["claim_count"].append(len(decision.get("claims", [])))
         h["length"].append(len(decision.get("justification", "")))
