@@ -9,13 +9,12 @@ risk judge the same way it fools grounding/entailment.
 """
 
 from config import W_RISK_IMPACT, W_RISK_BLAST, W_RISK_REVERSIBILITY, REVERSIBILITY_PENALTY
-from network.topology import ROUTER_IDS, all_agent_ids, overlap
 
 
-def blast_radius(affected_routers: list) -> float:
-    if not affected_routers:
+def blast_radius(affected_routers: list, router_ids: list) -> float:
+    if not affected_routers or not router_ids:
         return 0.0
-    return len(set(affected_routers)) / len(ROUTER_IDS)
+    return len(set(affected_routers)) / len(router_ids)
 
 
 def predicted_impact(state, action: dict) -> dict:
@@ -39,24 +38,24 @@ def reversibility_penalty(action_type: str) -> float:
     return REVERSIBILITY_PENALTY.get(action_type, 0.5)
 
 
-def propagation_risk(action: dict, agent_id: str) -> float:
+def propagation_risk(action: dict, agent_id: str, topology) -> float:
     """How much of the swarm would plausibly see this recommendation as peer
     context this turn -- fraction of OTHER agents whose observed domain
     overlaps this agent's. Reported alongside the risk score as a diagnostic,
     not folded into the weighted sum (kept to impact/blast/reversibility for
     this first pass, per the minimal-signal build order)."""
-    peers = [a for a in all_agent_ids() if a != agent_id]
+    peers = [a for a in topology.all_agent_ids() if a != agent_id]
     if not peers:
         return 0.0
-    reach = sum(1 for peer in peers if overlap(agent_id, peer))
+    reach = sum(1 for peer in peers if topology.overlap(agent_id, peer))
     return reach / len(peers)
 
 
 def recommendation_risk(state, action: dict, agent_id: str) -> dict:
     impact_detail = predicted_impact(state, action)
-    blast = blast_radius(impact_detail["affected_routers"])
+    blast = blast_radius(impact_detail["affected_routers"], state.topology.router_ids)
     reversibility = reversibility_penalty(action.get("type", "no_action_required"))
-    propagation = propagation_risk(action, agent_id)
+    propagation = propagation_risk(action, agent_id, state.topology)
 
     risk_score = (
         W_RISK_IMPACT * impact_detail["impact"]

@@ -20,7 +20,6 @@ from config import (
     HEALTH_W_LOSS,
 )
 from trust.policy_rules import LATENCY_HIGH, PACKET_LOSS_HIGH
-from network.topology import ROUTER_IDS, AGENT_DOMAINS, neighbors
 from network.actions import apply_effect
 
 CAPACITY_GBPS = 500.0
@@ -44,20 +43,21 @@ def _initial_router(rng: random.Random) -> dict:
 
 
 class NetworkState:
-    def __init__(self, seed: int = RANDOM_SEED):
+    def __init__(self, topology, seed: int = RANDOM_SEED):
+        self.topology = topology
         self.rng = random.Random(seed)
         self.turn = 0
-        self.routers = {r: _initial_router(self.rng) for r in ROUTER_IDS}
+        self.routers = {r: _initial_router(self.rng) for r in topology.router_ids}
 
     def snapshot(self) -> dict:
         return copy.deepcopy(self.routers)
 
     def observation_for(self, agent_id: str) -> dict:
         """Restricted view: only the router readings this agent is authorized
-        to see, per network.topology.AGENT_DOMAINS. This IS the partial-
+        to see, per self.topology.agent_domains. This IS the partial-
         observability model -- an agent literally cannot construct a view of
         routers outside its domain."""
-        routers = AGENT_DOMAINS.get(agent_id, [])
+        routers = self.topology.domain_of(agent_id)
         return {r: copy.deepcopy(self.routers[r]) for r in routers}
 
     def health_score(self, routers: dict = None) -> float:
@@ -113,7 +113,7 @@ class NetworkState:
             source = self.routers[incident_router]
             if source["congestion_level"] > PROPAGATION_THRESHOLD:
                 excess = source["congestion_level"] - PROPAGATION_THRESHOLD
-                for nb in neighbors(incident_router):
+                for nb in self.topology.neighbors(incident_router):
                     if nb not in self.routers:
                         continue
                     bump = excess * PROPAGATION_FACTOR
@@ -128,7 +128,7 @@ class NetworkState:
         is allowed to propagate)."""
         working = copy.deepcopy(self.routers)
         before_health = self.health_score(self.routers)
-        mutated, affected = apply_effect(working, action)
+        mutated, affected = apply_effect(working, action, self.topology)
         after_health = self.health_score(mutated)
         if committing:
             self.routers = mutated

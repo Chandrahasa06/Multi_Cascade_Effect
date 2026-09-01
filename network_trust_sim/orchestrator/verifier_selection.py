@@ -9,15 +9,15 @@ verification -- see trust.risk_score.predicted_impact, which already runs the
 same counterfactual simulation this would need, so it isn't duplicated here).
 """
 
-from network.topology import observers_of
-
-
-def select_verifiers(claim_router_ids: list, issuing_agent_id: str) -> list:
+def select_verifiers(claim_router_ids: list, issuing_agent_id: str, topology) -> list:
     verifiers = set()
     for router_id in claim_router_ids:
-        verifiers.update(observers_of(router_id))
+        verifiers.update(topology.observers_of(router_id))
     verifiers.discard(issuing_agent_id)
-    verifiers.discard("agent_orchestrator")  # empty domain -- never a legitimate verifier
+    # An orchestrator-role agent has an empty router domain by construction --
+    # never a legitimate verifier. Role-based, not a hardcoded literal id, so
+    # this keeps working across any topology.
+    verifiers -= {a for a in verifiers if topology.role_of(a) == "orchestrator"}
     return sorted(verifiers)
 
 

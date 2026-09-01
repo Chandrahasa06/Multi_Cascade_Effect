@@ -75,11 +75,13 @@ HEALTH_W_LOSS = 0.3
 
 # --- Hallucination mode (core/perception_noise.py) ---
 # Noisy OBSERVATION only, no intent -- establishes the false-positive/noise-
-# floor baseline before the semantic Byzantine mode below.
+# floor baseline before the semantic Byzantine mode below. The target
+# router is NOT configured here -- orchestrator/coordinator.py's
+# fault_router_for() derives it from the fault agent's own topology domain,
+# so this works on any topology, not just diamond6's "R2".
 HALLUCINATING_AGENT_ID = "agent_traffic"
 HALLUCINATION_TURN = 3
 HALLUCINATION_NOISE_LEVEL = 0.4
-HALLUCINATION_TARGET_ROUTERS = ["R2"]   # also doubles as the real-incident router for byzantine mode
 
 # --- Semantic Byzantine mode (core/agent.py's adversarial system prompt) ---
 BYZANTINE_AGENT_ID = "agent_traffic"
@@ -106,3 +108,16 @@ RISK_HIGH_THRESHOLD = 0.6
 # --- Verification Policy Matrix (orchestrator/verification.py) ---
 TRUST_LOW_THRESHOLD = FLAG_THRESHOLD   # reuse the existing 0.5 rather than inventing a new number
 TRUST_HIGH_THRESHOLD = 0.8
+
+# --- Discrete-event scheduling (orchestrator/event_coordinator.py) ---
+# Replaces the fixed-turn-order Coordinator's implicit "everyone moves in
+# lockstep, in this exact list order" with agents acting on independent,
+# jittered schedules -- 1.0 logical-time-unit is calibrated to feel like
+# "one old-style turn" so NetworkState.step()'s existing drift/propagation
+# magnitudes stay physically meaningful unchanged.
+AGENT_DECISION_INTERVAL = 1.0       # base logical-time gap between an agent's own successive decisions
+AGENT_DECISION_JITTER_STD = 0.15    # per-agent Gaussian jitter std-dev on that interval
+AGENT_START_JITTER_STD = 0.10       # small stagger on each agent's FIRST decision, so turn 1 isn't lockstep
+NETWORK_TICK_INTERVAL = 1.0         # background network evolution cadence
+ACCURACY_GRADE_DELAY = 1.0          # logical-time delay between a commit and grading it
+PEER_STALENESS_HORIZON = 2.0        # a bus entry older than this (logical time) is not "visible" to peers

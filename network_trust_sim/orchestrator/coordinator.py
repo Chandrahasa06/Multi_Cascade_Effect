@@ -4,22 +4,30 @@ two separate pipelines -- so a measured damage difference between worlds can
 be attributed to the defense itself, not to environment drift. Both worlds
 run against an identically-seeded NetworkState and identical fault schedule.
 
-Per turn: state.step() advances ground truth -> each agent (in an order that
-recreates the intended contagion pathway: traffic -> routing -> safety ->
-orchestrator, since agent_traffic/agent_routing overlap on R4 and
-agent_routing/agent_safety overlap on R5) builds its observation, decides,
-gets scored by the existing Tier-1/Tier-2 trust engine, gets a deterministic
-Recommendation Risk Score, and -- in world2_gated -- gets a verification
-action from the Trust x Risk matrix that can block it from propagating or
-committing to the network at all.
+Works against any topologies.base.Topology instance, not just diamond6 --
+self.agent_order is field agents in the order the topology declares them,
+then orchestrator-role agent(s) last, so the historical fixed
+diamond6-specific ordering (traffic -> routing -> safety -> orchestrator)
+falls out as one instance of this general rule rather than being hardcoded.
+
+Per turn: state.step() advances ground truth -> each agent (in that order)
+builds its observation, decides, gets scored by the existing Tier-1/Tier-2
+trust engine, gets a deterministic Recommendation Risk Score, and -- in
+world2_gated -- gets a verification action from the Trust x Risk matrix that
+can block it from propagating or committing to the network at all.
+
+This fixed-order, lockstep loop is kept working (not deleted) specifically
+as the baseline/regression comparison point for orchestrator/
+event_coordinator.py's discrete-event scheduler, which is what a real
+deployment's concurrent, asynchronous agents would actually look like --
+see event_coordinator.py's module docstring.
 """
 
 import random
 import time
 
-from config import TRUST_LOW_THRESHOLD, HALLUCINATION_NOISE_LEVEL, HALLUCINATION_TARGET_ROUTERS
+from config import TRUST_LOW_THRESHOLD, HALLUCINATION_NOISE_LEVEL
 from network.state import NetworkState
-from network.topology import AGENT_DOMAINS, AGENT_ROLES, all_agent_ids, field_agent_ids, overlap
 from network.observation import observation_to_source_text, pick_focus_router
 from core.agent import Agent, format_peer_context
 from core.perception_noise import corrupt_observation
@@ -34,10 +42,17 @@ from trust.cascade import check_contagion, gate_recommendation
 from orchestrator.verification import decide_verification
 from orchestrator.verifier_selection import select_verifiers, evidence_claim_verification
 
-AGENT_ORDER = ["agent_traffic", "agent_routing", "agent_safety", "agent_orchestrator"]
+
+def fault_router_for(topology, agent_id: str):
+    """Which router an incident/hallucination targets for a given fault
+    agent -- the first router in that agent's OWN domain, so a fault
+    scenario works on any topology instead of a hardcoded router id
+    (HALLUCINATION_TARGET_ROUTERS) that only happens to exist on diamond6."""
+    domain = topology.domain_of(agent_id)
+    return domain[0] if domain else None
 
 
-def build_action(decision: dict, agent_id: str, turn: int, clean_observation: dict = None) -> dict:
+def build_action(decision: dict, agent_id: str, turn: int, topology, clean_observation: dict = None) -> dict:
     """Coordinator-constructed action object -- the agent itself keeps
     returning exactly {claims, action, justification, confidence}, unchanged.
     Target-router inference is a deliberate simplification: defaults to the
@@ -45,7 +60,7 @@ def build_action(decision: dict, agent_id: str, turn: int, clean_observation: di
     single most-congested router in-domain as the reroute source) and
     no_action_required (no routers touched, by definition)."""
     action_type = decision.get("action", "no_action_required")
-    domain = list(AGENT_DOMAINS.get(agent_id, []))
+    domain = topology.domain_of(agent_id)
     action = {"type": action_type, "issuing_agent": agent_id, "target_routers": domain, "turn": turn}
 
     if action_type == "no_action_required":
@@ -61,20 +76,30 @@ def build_action(decision: dict, agent_id: str, turn: int, clean_observation: di
 
 
 class Coordinator:
-    def __init__(self, client, mode: str = "world2_gated", seed: int = None):
+    def __init__(self, client, topology, mode: str = "world2_gated", seed: int = None):
         self.client = client
+        self.topology = topology
         self.mode = mode  # "world1_undefended" | "world2_gated"
-        self.state = NetworkState(seed=seed) if seed is not None else NetworkState()
+        self.state = NetworkState(topology, seed=seed) if seed is not None else NetworkState(topology)
         self.agents = {
             agent_id: Agent(
                 agent_id,
                 agent_id.replace("agent_", ""),
                 client,
-                role=AGENT_ROLES[agent_id],
-                observed_routers=AGENT_DOMAINS[agent_id],
+                role=topology.role_of(agent_id),
+                observed_routers=topology.domain_of(agent_id),
             )
-            for agent_id in all_agent_ids()
+            for agent_id in topology.all_agent_ids()
         }
+        # Field agents in whatever order the topology declares them, then
+        # orchestrator-role agent(s) last -- generalizes the old hardcoded
+        # AGENT_ORDER list without assuming specific agent ids. For diamond6
+        # this reproduces the exact original order (traffic, routing, safety,
+        # orchestrator), since that's the order diamond6's agent_domains dict
+        # declares them in.
+        self.agent_order = topology.field_agent_ids() + [
+            a for a in topology.all_agent_ids() if topology.role_of(a) == "orchestrator"
+        ]
         self.grounding_checker = GroundingChecker(client)
         self.entailment_checker = EntailmentChecker(client)
         self.behavior_tracker = BehaviorTracker()
@@ -95,10 +120,11 @@ class Coordinator:
         self.pending_accuracy = {}
 
     def run_turn(self, turn: int, scenario) -> list:
+        fault_router = fault_router_for(self.topology, scenario.fault_agent_id)
         incident = None
-        if scenario.fault_mode in ("hallucinating", "byzantine") and turn >= scenario.fault_turn:
+        if scenario.fault_mode in ("hallucinating", "byzantine") and turn >= scenario.fault_turn and fault_router:
             incident = {
-                "router_id": HALLUCINATION_TARGET_ROUTERS[0],
+                "router_id": fault_router,
                 "severity": turn - scenario.fault_turn + 1,
             }
         self.state.step(incident=incident)
@@ -108,7 +134,7 @@ class Coordinator:
         peer_actions = {}
         turn_records = []
 
-        for agent_id in AGENT_ORDER:
+        for agent_id in self.agent_order:
             agent = self.agents[agent_id]
             is_fault_turn = (
                 scenario.fault_mode != "healthy"
@@ -116,28 +142,28 @@ class Coordinator:
                 and turn >= scenario.fault_turn
             )
 
-            if agent_id == "agent_orchestrator":
+            if self.topology.role_of(agent_id) == "orchestrator":
                 clean_observation = {}
                 domain_health_before = 1.0
-                overlapping_peers = [p for p in field_agent_ids() if p in decisions]
+                overlapping_peers = [p for p in self.topology.field_agent_ids() if p in decisions]
             else:
                 clean_observation = self.state.observation_for(agent_id)
                 domain_health_before = self.state.health_score(clean_observation)
                 overlapping_peers = [
-                    p for p in field_agent_ids()
-                    if p != agent_id and overlap(agent_id, p) and p in decisions
+                    p for p in self.topology.field_agent_ids()
+                    if p != agent_id and self.topology.overlap(agent_id, p) and p in decisions
                 ]
 
             peer_context = [format_peer_context(p, p, decisions[p]) for p in overlapping_peers]
 
             observation = clean_observation
-            if is_fault_turn and scenario.fault_mode == "hallucinating":
+            if is_fault_turn and scenario.fault_mode == "hallucinating" and fault_router:
                 observation = corrupt_observation(
-                    clean_observation, HALLUCINATION_TARGET_ROUTERS, HALLUCINATION_NOISE_LEVEL, self.rng
+                    clean_observation, [fault_router], HALLUCINATION_NOISE_LEVEL, self.rng
                 )
             adversarial = is_fault_turn and scenario.fault_mode == "byzantine"
 
-            if agent_id == "agent_orchestrator":
+            if self.topology.role_of(agent_id) == "orchestrator":
                 source_text = "\n\n".join(peer_context) if peer_context else "(no peer reports yet this turn)"
                 observation_text = source_text
             else:
@@ -147,7 +173,7 @@ class Coordinator:
             t0 = time.time()
             decision = agent.decide(observation_text, peer_context=peer_context, adversarial=adversarial)
 
-            focus_telemetry = pick_focus_router(clean_observation) if agent_id != "agent_orchestrator" else {}
+            focus_telemetry = pick_focus_router(clean_observation) if self.topology.role_of(agent_id) != "orchestrator" else {}
             accuracy = self.accuracy_tracker.score(agent_id)
 
             consistency_checker = ConsistencyChecker(agent, self.client, adversarial=adversarial)
@@ -161,8 +187,8 @@ class Coordinator:
 
             contagion = check_contagion(decision, peer_actions, overlapping_peers, result["detail"]["policy_alignment"])
 
-            action = build_action(decision, agent_id, turn, clean_observation)
-            if agent_id == "agent_orchestrator":
+            action = build_action(decision, agent_id, turn, self.topology, clean_observation)
+            if self.topology.role_of(agent_id) == "orchestrator":
                 current_health = self.state.health_score()
                 risk_detail = {
                     "risk_score": 0.0, "impact": 0.0, "blast_radius": 0.0, "reversibility": 0.0,
@@ -180,17 +206,17 @@ class Coordinator:
             else:
                 verification = decide_verification(result["trust_score"], risk_detail["risk_score"])
                 if verification["verification_action"] != "execute":
-                    verifiers_selected = select_verifiers(action["target_routers"], agent_id)
+                    verifiers_selected = select_verifiers(action["target_routers"], agent_id, self.topology)
                     evidence_result = evidence_claim_verification(action["target_routers"], self.state, decision)
                 gate = gate_recommendation(
                     decision, verification["verification_action"], contagion,
                     result["trust_score"], TRUST_LOW_THRESHOLD,
                 )
 
-            if gate["propagate"] and agent_id != "agent_orchestrator":
+            if gate["propagate"] and self.topology.role_of(agent_id) != "orchestrator":
                 self.state.apply_action(action, committing=True)
 
-            if agent_id != "agent_orchestrator":
+            if self.topology.role_of(agent_id) != "orchestrator":
                 self.pending_accuracy[agent_id] = {"decision": decision, "health_before": domain_health_before}
 
             decisions[agent_id] = decision
@@ -199,8 +225,8 @@ class Coordinator:
             turn_records.append({
                 "turn": turn,
                 "agent_id": agent_id,
-                "role": AGENT_ROLES[agent_id],
-                "observed_routers": AGENT_DOMAINS[agent_id],
+                "role": self.topology.role_of(agent_id),
+                "observed_routers": self.topology.domain_of(agent_id),
                 "fault_mode": scenario.fault_mode if is_fault_turn else "healthy",
                 "decision": decision,
                 "result": {k: v for k, v in result.items() if k != "detail"},

@@ -7,11 +7,10 @@ topology overlap so coincidental agreement on a genuinely shared symptom
 doesn't get counted as contagion.
 """
 
-from network.topology import overlap, field_agent_ids
-
-
-def correlated_action_rate(run_log: list, source_agent_id: str, target_agent_id: str, window: int = 3) -> dict:
-    if not overlap(source_agent_id, target_agent_id):
+def correlated_action_rate(
+    run_log: list, source_agent_id: str, target_agent_id: str, topology, window: int = 3
+) -> dict:
+    if not topology.overlap(source_agent_id, target_agent_id):
         return {
             "rate": 0.0,
             "reason": "no domain overlap -- not a meaningful contagion pathway",
@@ -39,12 +38,12 @@ def correlated_action_rate(run_log: list, source_agent_id: str, target_agent_id:
     return {"rate": rate, "matches": matches, "checked": checked, "flagged_turns": flagged_turns}
 
 
-def contagion_report(run_log: list) -> dict:
-    agents = field_agent_ids()
+def contagion_report(run_log: list, topology) -> dict:
+    agents = topology.field_agent_ids()
     report = {}
     for source in agents:
         for target in agents:
             if source == target:
                 continue
-            report[f"{source}->{target}"] = correlated_action_rate(run_log, source, target)
+            report[f"{source}->{target}"] = correlated_action_rate(run_log, source, target, topology)
     return report

@@ -12,8 +12,6 @@ anything else that needs "what did this action touch") using one single
 consistent definition instead of two possibly-diverging ones.
 """
 
-from network.topology import neighbors
-
 ACTION_TYPES = {
     "no_action_required",
     "increase_qos_priority",
@@ -29,11 +27,13 @@ def _recompute_derived(r: dict) -> None:
     r["routing_cost"] = round(1.0 + r["congestion_level"] / 100, 2)
 
 
-def apply_effect(routers: dict, action: dict) -> tuple:
+def apply_effect(routers: dict, action: dict, topology) -> tuple:
     """Mutates `routers` in place and returns (routers, affected_router_ids).
     `routers` is expected to already be a working copy the caller owns --
     this function never decides committing vs. counterfactual, the caller
-    (NetworkState.apply_action) does."""
+    (NetworkState.apply_action) does. `topology` supplies neighbors() for
+    reroute_traffic -- this function doesn't assume any particular network
+    shape."""
     action_type = action.get("type", "no_action_required")
     targets = [r for r in action.get("target_routers", []) if r in routers]
     affected = []
@@ -67,7 +67,7 @@ def apply_effect(routers: dict, action: dict) -> tuple:
 
     elif action_type == "reroute_traffic":
         for rid in targets:
-            candidates = [n for n in neighbors(rid) if n in routers]
+            candidates = [n for n in topology.neighbors(rid) if n in routers]
             if not candidates:
                 continue
             requested = action.get("reroute_to")

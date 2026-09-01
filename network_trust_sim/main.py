@@ -17,9 +17,11 @@ from trust.cascade import check_contagion
 from trust.contagion_metrics import contagion_report
 from scenarios import from_args
 from orchestrator.coordinator import Coordinator
+from orchestrator.event_coordinator import EventCoordinator
 from eval.comparison import (
     network_damage, damage_reduction, detection_latency, false_positive_rate, verification_overhead,
 )
+from eval.execution_mode_comparison import compare_execution_modes
 
 LOG_DIR = "logs"
 
@@ -180,8 +182,9 @@ def print_new_result_block(record):
     flag_str = (" [" + " | ".join(flags) + "]") if flags else ""
 
     decision = record["decision"]
+    time_str = f", t={record['logical_time']:.2f}" if "logical_time" in record else ""
     print(
-        f"\n[Turn {record['turn']}] {record['agent_id']} ({record['role']}, routers={record['observed_routers']})"
+        f"\n[Turn {record['turn']}{time_str}] {record['agent_id']} ({record['role']}, routers={record['observed_routers']})"
         f"  ({record['elapsed_sec']:.1f}s){flag_str}"
     )
     if record.get("peer_ids_seen"):
@@ -200,14 +203,14 @@ def print_new_result_block(record):
 
 
 def run_scenario(scenario, client, verbose=True):
-    coordinator = Coordinator(
-        client,
-        mode="world1_undefended" if scenario.world == 1 else "world2_gated",
-        seed=scenario.seed,
-    )
+    topology = scenario.resolve_topology()
+    mode = "world1_undefended" if scenario.world == 1 else "world2_gated"
+    coordinator_cls = EventCoordinator if scenario.execution_mode == "event_based" else Coordinator
+    coordinator = coordinator_cls(client, topology, mode=mode, seed=scenario.seed)
     print(
         f"World {scenario.world} | fault={scenario.fault_mode} "
-        f"(agent={scenario.fault_agent_id}, from turn {scenario.fault_turn}) | turns={scenario.num_turns}"
+        f"(agent={scenario.fault_agent_id}, from turn {scenario.fault_turn}) | turns={scenario.num_turns} "
+        f"| execution={scenario.execution_mode} | topology={scenario.topology_name}"
     )
     result = coordinator.run(scenario)
     if verbose:
@@ -230,6 +233,7 @@ def run_comparison(scenario, client):
     """Same fault/seed, World 1 then World 2 -- reports damage reduction and
     the other headline metrics. A single Coordinator class runs both worlds
     via its `mode` flag, so this is a fair comparison, not two pipelines."""
+    topology = scenario.resolve_topology()
     base_kwargs = dict(scenario.__dict__)
     scenario_w1 = type(scenario)(**{**base_kwargs, "world": 1})
     scenario_w2 = type(scenario)(**{**base_kwargs, "world": 2})
@@ -249,8 +253,8 @@ def run_comparison(scenario, client):
         "detection_latency_turns": detection_latency(result_w2["run_log"], scenario.fault_turn, scenario.fault_agent_id),
         "false_positive_rate_world2": false_positive_rate(result_w2["run_log"], scenario.fault_agent_id, scenario.fault_turn),
         "verification_overhead": verification_overhead(result_w2["run_log"]),
-        "contagion_world1": contagion_report(result_w1["run_log"]),
-        "contagion_world2": contagion_report(result_w2["run_log"]),
+        "contagion_world1": contagion_report(result_w1["run_log"], topology),
+        "contagion_world2": contagion_report(result_w2["run_log"], topology),
     }
 
     print("\n=== Two-world comparison ===")
@@ -260,6 +264,36 @@ def run_comparison(scenario, client):
     return summary
 
 
+def run_execution_mode_comparison(scenario, client):
+    """--compare-execution-modes: same seeded fault scenario through both the
+    turn-based Coordinator and the discrete-event EventCoordinator, checking
+    that the qualitative detection story (flagging, gating) holds under
+    both -- not that the two produce numerically identical output."""
+    print(
+        f"Comparing execution modes | world={scenario.world} fault={scenario.fault_mode} "
+        f"(agent={scenario.fault_agent_id}, from turn {scenario.fault_turn}) | turns={scenario.num_turns}"
+    )
+    result = compare_execution_modes(scenario, client)
+    print("\n=== Execution-mode comparison ===")
+    print(json.dumps(
+        {
+            "turn_based": {**result["turn_based"]["detection"], "network_damage": result["turn_based"]["network_damage"]},
+            "event_based": {**result["event_based"]["detection"], "network_damage": result["event_based"]["network_damage"]},
+            "qualitative_agreement": result["qualitative_agreement"],
+        },
+        indent=2,
+    ))
+    save_log(
+        {
+            "turn_based_run_log": result["turn_based"]["run_log"],
+            "event_based_run_log": result["event_based"]["run_log"],
+            "qualitative_agreement": result["qualitative_agreement"],
+        },
+        prefix="execution_mode_comparison",
+    )
+    return result
+
+
 def run():
     scenario = from_args()
 
@@ -267,14 +301,19 @@ def run():
         run_legacy()
         return
 
+    scenario.resolve_topology()  # fail fast on a bad fault_agent/topology combo, before any LLM calls
     client = OllamaClient()
+
+    if scenario.compare_execution_modes:
+        run_execution_mode_comparison(scenario, client)
+        return
 
     if scenario.compare:
         run_comparison(scenario, client)
         return
 
     result = run_scenario(scenario, client, verbose=True)
-    save_log(result["run_log"], prefix=f"run_world{scenario.world}_{scenario.fault_mode}")
+    save_log(result["run_log"], prefix=f"run_world{scenario.world}_{scenario.fault_mode}_{scenario.execution_mode}")
 
 
 if __name__ == "__main__":
