@@ -5,11 +5,19 @@ Nothing here talks to the internet -- it only ever hits OLLAMA_HOST.
 
 import json
 import re
+import time
 
 import requests
 from json_repair import repair_json
 
-from config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_EMBED_MODEL, VERBOSE
+from config import (
+    OLLAMA_HOST,
+    OLLAMA_MODEL,
+    OLLAMA_EMBED_MODEL,
+    OLLAMA_TIMEOUT,
+    OLLAMA_MAX_RETRIES,
+    VERBOSE,
+)
 
 
 def extract_json(raw: str) -> dict:
@@ -43,7 +51,11 @@ class OllamaClient:
         self.model = model
 
     def chat(self, system: str, user: str, temperature: float = 0.7, label: str = "") -> str:
-        """Single-turn chat call. Returns the raw text response."""
+        """Single-turn chat call. Returns the raw text response. Retries
+        once on a timeout/connection error (CPU inference of an 8B model can
+        occasionally stall, especially the first call after Ollama
+        idle-unloads the model) -- this is a transport-level retry, separate
+        from chat_json's own retry-on-malformed-JSON."""
         if VERBOSE and label:
             # A single dot per call -- just enough to show a long escalation
             # (initial decision + resamples) is still alive, without the noise
@@ -58,10 +70,20 @@ class OllamaClient:
             "stream": False,
             "options": {"temperature": temperature},
         }
-        resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=180)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["message"]["content"]
+        last_error = None
+        for attempt in range(OLLAMA_MAX_RETRIES + 1):
+            try:
+                resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["message"]["content"]
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                last_error = e
+                if attempt < OLLAMA_MAX_RETRIES:
+                    if VERBOSE:
+                        print(f"!(retrying {label})", end="", flush=True)
+                    time.sleep(2)
+        raise last_error
 
     def chat_json(self, system: str, user: str, temperature: float = 0.7, label: str = "") -> dict:
         """Chat call that expects a JSON object back, with extraction/repair applied.
