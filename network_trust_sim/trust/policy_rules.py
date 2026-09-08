@@ -11,9 +11,14 @@ the real numbers.
 
 UTIL_HIGH = 80.0
 UTIL_CRITICAL = 90.0
-ERROR_HIGH = 0.3
-PACKET_LOSS_HIGH = 0.5
-LATENCY_HIGH = 12.0
+ERROR_HIGH = 0.32       # nudged above the natural clean-turn ceiling (0.30) so a normal draw can't graze it
+PACKET_LOSS_HIGH = 0.55  # same reasoning -- natural clean-turn ceiling is 0.50
+LATENCY_HIGH = 18.0      # was 12.0 -- that sat *inside* telemetry.py's normal 2-15ms range for every
+                          # clean turn (incident or not), so ~20% of completely clean turns randomly
+                          # failed this check for a reason unrelated to any attack. Now above the
+                          # natural clean ceiling; telemetry.py escalates latency during a real
+                          # incident (see core/telemetry.py), so this threshold is only meaningful
+                          # when it's actually supposed to be.
 
 ALL_ACTIONS = {
     "no_action_required",
