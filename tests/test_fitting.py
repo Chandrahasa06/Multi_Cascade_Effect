@@ -4,6 +4,8 @@ import pytest
 
 from dataplane.fitting import (
     BENIGN_LABEL,
+    FeatureKind,
+    feature_kind,
     fit_thresholds,
     fit_thresholds_from_frame,
     load_thresholds,
@@ -239,6 +241,96 @@ class TestFitThresholdsFromFrame:
         result = fit_thresholds_from_frame(df, feature_names=["some_feature"], percentile=50)
         assert result.reports["some_feature"].excluded_low_confidence == 0
         assert result.reports["some_feature"].used == 5
+
+
+class TestFeatureKindClassification:
+    def test_known_bounded_features(self):
+        assert feature_kind("no_response_flag") == FeatureKind.BOOLEAN
+        assert feature_kind("syn_ratio") == FeatureKind.BOUNDED_RATIO
+        assert feature_kind("rst_ratio") == FeatureKind.BOUNDED_RATIO
+
+    def test_unknown_feature_defaults_continuous(self):
+        assert feature_kind("flow_duration") == FeatureKind.CONTINUOUS
+        assert feature_kind("some_new_feature") == FeatureKind.CONTINUOUS
+
+
+class TestBoundedFeatureFitting:
+    def make_frame(self, n, feature_values, name="no_response_flag"):
+        return pd.DataFrame(
+            {
+                "label": [BENIGN_LABEL] * n,
+                name: feature_values,
+                f"{name}__low_confidence": [False] * n,
+            }
+        )
+
+    def test_boolean_rare_true_is_already_fittable_without_saturating(self):
+        # 1 in 500 (0.2%) benign flows has no_response_flag=True: rarer
+        # than the p99.5 budget (0.5%), so the percentile itself lands at
+        # 0.0 (the majority value), not at the 1.0 bound — ordinary `>`
+        # fitting already separates the rare True from the common False
+        # without needing any special-casing.
+        values = [0.0] * 499 + [1.0]
+        df = self.make_frame(len(values), values)
+        result = fit_thresholds_from_frame(df, feature_names=["no_response_flag"], percentile=99.5)
+        threshold = result.config.thresholds["no_response_flag"]
+        assert threshold.high == 0.0  # fires on value=1.0 via plain `> 0.0`
+        report = result.reports["no_response_flag"]
+        assert report.kind == "boolean"
+        assert report.saturated is False
+
+    def test_boolean_common_true_is_unfittable_not_uncrossable(self):
+        # old bug: p99.5 of a mostly-True boolean is 1.0, and `value > 1.0`
+        # can never be true — silently dead forever. New behavior: report
+        # it as saturated and omit the threshold rather than fit a dead one.
+        values = [1.0] * 20 + [0.0] * 80  # 20% True: far above any p99.x budget
+        df = self.make_frame(len(values), values)
+        result = fit_thresholds_from_frame(df, feature_names=["no_response_flag"], percentile=99.5)
+        assert "no_response_flag" not in result.config.thresholds
+        report = result.reports["no_response_flag"]
+        assert report.saturated is True
+        assert report.used == 100  # unfittable due to saturation, not lack of data
+
+    def test_boolean_all_false_still_fits_a_useful_threshold(self):
+        # a feature that's constant in benign data isn't the saturation
+        # pathology — high=0.0 correctly fires on any nonzero (attack)
+        # value, same as ordinary percentile fitting on a constant column.
+        values = [0.0] * 100
+        df = self.make_frame(len(values), values)
+        result = fit_thresholds_from_frame(df, feature_names=["no_response_flag"], percentile=99.5)
+        assert result.config.thresholds["no_response_flag"].high == 0.0
+        assert result.reports["no_response_flag"].saturated is False
+
+    def test_bounded_ratio_saturating_at_one_is_unfittable(self):
+        values = [0.1] * 80 + [1.0] * 20  # 20% at the bound: far above any p99.x budget
+        df = self.make_frame(len(values), values, name="syn_ratio")
+        result = fit_thresholds_from_frame(df, feature_names=["syn_ratio"], percentile=99.5)
+        assert "syn_ratio" not in result.config.thresholds
+        report = result.reports["syn_ratio"]
+        assert report.kind == "bounded_ratio"
+        assert report.saturated is True
+
+    def test_bounded_ratio_interior_percentile_behaves_like_continuous(self):
+        # no saturation: p99.5 lands well inside (0, 1), ordinary fitting.
+        values = list(np.linspace(0.0, 0.5, 200))
+        df = self.make_frame(len(values), values, name="syn_ratio")
+        result = fit_thresholds_from_frame(df, feature_names=["syn_ratio"], percentile=50.0)
+        report = result.reports["syn_ratio"]
+        assert report.saturated is False
+        expected = float(np.percentile(values, 50.0))
+        assert result.config.thresholds["syn_ratio"].high == pytest.approx(expected)
+
+    def test_continuous_feature_never_flagged_saturated(self):
+        df = pd.DataFrame(
+            {
+                "label": [BENIGN_LABEL] * 5,
+                "flow_duration": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "flow_duration__low_confidence": [False] * 5,
+            }
+        )
+        result = fit_thresholds_from_frame(df, feature_names=["flow_duration"], percentile=80.0)
+        assert result.reports["flow_duration"].kind == "continuous"
+        assert result.reports["flow_duration"].saturated is False
 
 
 class TestJsonRoundTrip:

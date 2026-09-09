@@ -23,7 +23,7 @@ from dataplane.src_table import SrcTable
 #: bump whenever compute_tier1_features/compute_src_features change what
 #: they return (new/removed/redefined features) — cached extractions key
 #: on this so a code change invalidates the cache. See eval/simulate.py.
-FEATURE_SCHEMA_VERSION = "2"
+FEATURE_SCHEMA_VERSION = "3"
 
 #: Timing-derived Tier-1 features whose confidence depends on how
 #: precisely the flow's timestamps are known. A flow that passed through
@@ -221,8 +221,13 @@ class TriggerReason:
 @dataclass(frozen=True, slots=True)
 class SelectorConfig:
     thresholds: Dict[str, FeatureThreshold]
-    rule: EscalationRule = EscalationRule.ANY
-    k: int = 1  # only used when rule == K_OF_N
+    # k_of_n(k=2) is the default, not 'any': with ~20 independently-fit
+    # features, 'any' compounds each feature's own (100-p)% miss rate
+    # into a much higher combined false-positive rate (68.9% benign
+    # escalation at p90 was observed under 'any' vs 0.44% under k=2 at a
+    # matched overall rate) — see eval/run_all.py's sweep comparison.
+    rule: EscalationRule = EscalationRule.K_OF_N
+    k: int = 2  # only used when rule == K_OF_N
     config_hash: str = ""  # identifies the fitted threshold set that produced this
 
     def to_dict(self) -> dict:
@@ -239,8 +244,8 @@ class SelectorConfig:
             thresholds={
                 name: FeatureThreshold.from_dict(t) for name, t in data["thresholds"].items()
             },
-            rule=EscalationRule(data.get("rule", "any")),
-            k=data.get("k", 1),
+            rule=EscalationRule(data.get("rule", "k_of_n")),
+            k=data.get("k", 2),
             config_hash=data.get("config_hash", ""),
         )
 

@@ -19,7 +19,12 @@ import pandas as pd
 from adapters.csv_flow_adapter import ADAPTER_VERSION, AdapterStats, iter_packets_from_csv
 from dataplane.flow_state import FlowState
 from dataplane.flow_table import FlowTable, KeyMode
-from dataplane.selector import FEATURE_SCHEMA_VERSION, compute_src_features, compute_tier1_features
+from dataplane.selector import (
+    FEATURE_SCHEMA_VERSION,
+    FeatureObservation,
+    compute_src_features,
+    compute_tier1_features,
+)
 from dataplane.src_table import SrcTable
 from eval.labels import (
     JoinReport,
@@ -72,7 +77,27 @@ def _cache_paths(day: str, key_mode: KeyMode, cache_dir: Path) -> Tuple[Path, Pa
     return cache_dir / f"{base}.parquet", cache_dir / f"{base}.meta.json"
 
 
-def _close_flow(state: FlowState, src_table: SrcTable) -> None:
+def _finalize_flow(
+    state: FlowState,
+    reason: str,
+    src_table: SrcTable,
+    closed_flows: List[FlowState],
+    closure_reasons: List[str],
+    feature_rows: List[Dict[str, FeatureObservation]],
+) -> None:
+    """Close one flow in SrcTable AND snapshot its features, both at
+    this exact instant. Per-source features MUST be read here, not in a
+    later pass over closed_flows — SrcTable is a single mutable
+    streaming structure whose buckets keep rotating forward as later
+    packets are processed. Querying it after the whole file has been
+    consumed, even while passing this flow's own last_ts as `now_us`,
+    cannot "rewind" a bucket that has already rotated past that time; it
+    can only fail to evict something that's already gone. In practice
+    that made every flow's per-source features reflect the state as of
+    *end of file*, not as of when that flow actually closed — silently
+    starving distinct_dst_ips_per_src and friends for anything that
+    wasn't still active in the last ~60s of the capture.
+    """
     src_table.note_flow_closed(
         state.fwd_ip,
         state.last_ts,
@@ -80,16 +105,23 @@ def _close_flow(state: FlowState, src_table: SrcTable) -> None:
         syn_count=state.syn_count,
         bwd_pkt_count=state.bwd_pkt_count,
     )
+    features: Dict[str, FeatureObservation] = dict(compute_tier1_features(state))
+    features.update(compute_src_features(src_table, state.fwd_ip, state.last_ts))
+
+    closed_flows.append(state)
+    closure_reasons.append(reason)
+    feature_rows.append(features)
 
 
 def _run_simulation(
     csv_path: Union[str, Path], key_mode: KeyMode, capacity: Optional[int]
-) -> Tuple[List[FlowState], List[str], AdapterStats, FlowTable, SrcTable]:
+) -> Tuple[List[FlowState], List[str], List[Dict[str, FeatureObservation]], AdapterStats, FlowTable, SrcTable]:
     table = FlowTable(key_mode=key_mode, capacity=capacity)
     src_table = SrcTable()
     stats = AdapterStats()
     closed_flows: List[FlowState] = []
     closure_reasons: List[str] = []
+    feature_rows: List[Dict[str, FeatureObservation]] = []
 
     for packet in iter_packets_from_csv(csv_path, stats=stats):
         result = table.process(packet)
@@ -98,16 +130,12 @@ def _run_simulation(
                 packet.src_ip, packet.dst_ip, packet.dst_port, packet.timestamp_us
             )
         for expired in result.expired:
-            _close_flow(expired.state, src_table)
-            closed_flows.append(expired.state)
-            closure_reasons.append(expired.reason)
+            _finalize_flow(expired.state, expired.reason, src_table, closed_flows, closure_reasons, feature_rows)
 
     for expired in table.flush():
-        _close_flow(expired.state, src_table)
-        closed_flows.append(expired.state)
-        closure_reasons.append(expired.reason)
+        _finalize_flow(expired.state, expired.reason, src_table, closed_flows, closure_reasons, feature_rows)
 
-    return closed_flows, closure_reasons, stats, table, src_table
+    return closed_flows, closure_reasons, feature_rows, stats, table, src_table
 
 
 def extract_day_features(
@@ -137,7 +165,7 @@ def extract_day_features(
 
     start = time.perf_counter()
     row_truth = load_row_ground_truth(csv_path)
-    closed_flows, closure_reasons, stats, table, src_table = _run_simulation(
+    closed_flows, closure_reasons, feature_rows, stats, table, src_table = _run_simulation(
         csv_path, key_mode, capacity
     )
 
@@ -153,8 +181,8 @@ def extract_day_features(
         join_report = build_fidelity_join_report(closed_flows, resolutions)
 
     records = []
-    for flow, label, mixed, ambiguous, reason in zip(
-        closed_flows, labels, mixed_flags, ambiguous_flags, closure_reasons
+    for flow, label, mixed, ambiguous, reason, features in zip(
+        closed_flows, labels, mixed_flags, ambiguous_flags, closure_reasons, feature_rows
     ):
         row: Dict[str, object] = {
             "label": label,
@@ -171,8 +199,6 @@ def extract_day_features(
             "last_ts": flow.last_ts,
             "closure_reason": reason,
         }
-        features = dict(compute_tier1_features(flow))
-        features.update(compute_src_features(src_table, flow.fwd_ip, flow.last_ts))
         for name, observation in features.items():
             row[name] = observation.value
             row[f"{name}__low_confidence"] = observation.low_confidence

@@ -1,11 +1,17 @@
 """End-to-end: load cached per-day features (running extraction if the
 cache is cold), fit on Monday's chronological first half, sweep, run the
-three ablations, and write everything to results/.
+ablations, and write everything to results/.
+
+k_of_n(k=2) is the default rule (see dataplane/selector.py) given the
+union-bound blowup measured under 'any' with ~20 independently-fit
+features. 'any' is kept as an explicit ablation for comparison, not the
+baseline.
 """
 from __future__ import annotations
 
 import sys
 import time
+from pathlib import Path
 
 import pandas as pd
 
@@ -25,6 +31,14 @@ from eval.sweep import (
 )
 
 TARGET_TRIGGER_FREQ_RATE = 0.05
+DEAD_FEATURE_CLASSES = (
+    "distinct_dst_ips_per_src",
+    "flow_bytes_per_sec",
+    "no_response_flag",
+    "init_win_bytes_fwd",
+    "init_win_bytes_bwd",
+    "syn_ratio",
+)
 
 
 def load_all(key_mode: KeyMode):
@@ -59,6 +73,21 @@ def build_join_rate_table(eval_metas: dict, fidelity_metas: dict) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
+def print_dead_feature_diagnosis(baseline_fits, operating_percentile) -> None:
+    reports = baseline_fits[operating_percentile].reports
+    print(f"\n=== dead-feature diagnosis (at p={operating_percentile:.3f}) ===")
+    print(f"{'feature':<28} {'kind':<14} {'saturated':<10} {'used':>10} {'excl_undef':>11} {'excl_lowconf':>13}")
+    for name in DEAD_FEATURE_CLASSES:
+        r = reports.get(name)
+        if r is None:
+            print(f"{name:<28} (not in fitting report)")
+            continue
+        print(
+            f"{name:<28} {r.kind:<14} {str(r.saturated):<10} {r.used:>10} "
+            f"{r.excluded_undefined:>11} {r.excluded_low_confidence:>13}"
+        )
+
+
 def main() -> None:
     print("=== EVAL-mode extraction (feeds the sweep) ===")
     eval_frames, eval_metas = load_all(KeyMode.EVAL)
@@ -76,41 +105,25 @@ def main() -> None:
     week_df = pd.concat([holdout_half, other_days], ignore_index=True)
     print(f"operational week (Monday holdout + Tue-Fri): {len(week_df)} flows")
 
+    # Web Attack survival check: confirm the WebAttacks file's 62.9%
+    # blank-row problem didn't eat into the labelled classes themselves.
+    web_attack_counts = week_df.loc[
+        week_df["label"].str.startswith("Web Attack", na=False), "label"
+    ].value_counts()
+    print("\nWeb Attack rows surviving into the operational week:")
+    print(web_attack_counts.to_string())
+
     total_flows = sum(m["flows_total"] for m in eval_metas.values())
     total_src_evictions = sum(m["src_table_eviction_count"] for m in eval_metas.values())
     src_eviction_rate = total_src_evictions / total_flows if total_flows else 0.0
-    print(f"source-table eviction rate across the week: {src_eviction_rate:.4%}")
+    print(f"\nsource-table eviction rate across the week: {src_eviction_rate:.4%}")
     print("flow-table eviction rate: 0.0000% (EVAL mode is unbounded by design)")
 
     all_features = all_feature_names(monday)
     flow_features = tier1_feature_names(monday)
 
-    print("\n=== baseline sweep ===")
+    print("\n=== baseline sweep (k_of_n, k=2) ===")
     baseline_result, baseline_fits = run_sweep(
-        fit_half,
-        holdout_half,
-        week_df,
-        feature_names=all_features,
-        rule=EscalationRule.ANY,
-        exclude_low_confidence=True,
-        src_table_eviction_rate=src_eviction_rate,
-        ablation_name="baseline",
-    )
-
-    print("=== ablation: per-flow features only ===")
-    flow_only_result, _ = run_sweep(
-        fit_half,
-        holdout_half,
-        week_df,
-        feature_names=flow_features,
-        rule=EscalationRule.ANY,
-        exclude_low_confidence=True,
-        src_table_eviction_rate=src_eviction_rate,
-        ablation_name="per_flow_only",
-    )
-
-    print("=== ablation: k_of_n k=2 ===")
-    k2_result, _ = run_sweep(
         fit_half,
         holdout_half,
         week_df,
@@ -119,7 +132,19 @@ def main() -> None:
         k=2,
         exclude_low_confidence=True,
         src_table_eviction_rate=src_eviction_rate,
-        ablation_name="k_of_n_k2",
+        ablation_name="baseline_k_of_n_k2",
+    )
+
+    print("=== ablation: 'any' rule (for comparison against the new default) ===")
+    any_rule_result, _ = run_sweep(
+        fit_half,
+        holdout_half,
+        week_df,
+        feature_names=all_features,
+        rule=EscalationRule.ANY,
+        exclude_low_confidence=True,
+        src_table_eviction_rate=src_eviction_rate,
+        ablation_name="any_rule",
     )
 
     print("=== ablation: k_of_n k=3 ===")
@@ -135,31 +160,47 @@ def main() -> None:
         ablation_name="k_of_n_k3",
     )
 
-    print("=== ablation: low-confidence features included ===")
+    print("=== ablation: per-flow features only (k_of_n, k=2) ===")
+    flow_only_result, _ = run_sweep(
+        fit_half,
+        holdout_half,
+        week_df,
+        feature_names=flow_features,
+        rule=EscalationRule.K_OF_N,
+        k=2,
+        exclude_low_confidence=True,
+        src_table_eviction_rate=src_eviction_rate,
+        ablation_name="per_flow_only",
+    )
+
+    print("=== ablation: low-confidence features included (k_of_n, k=2) ===")
     low_conf_result, _ = run_sweep(
         fit_half,
         holdout_half,
         week_df,
         feature_names=all_features,
-        rule=EscalationRule.ANY,
+        rule=EscalationRule.K_OF_N,
+        k=2,
         exclude_low_confidence=False,
         src_table_eviction_rate=src_eviction_rate,
         ablation_name="low_confidence_included",
     )
 
     ablations = {
-        "baseline": baseline_result,
-        "per_flow_only": flow_only_result,
-        "k_of_n_k2": k2_result,
+        "baseline_k_of_n_k2": baseline_result,
+        "any_rule": any_rule_result,
         "k_of_n_k3": k3_result,
+        "per_flow_only": flow_only_result,
         "low_confidence_included": low_conf_result,
     }
 
-    point5 = nearest_point(baseline_result, TARGET_TRIGGER_FREQ_RATE)
+    point5 = nearest_point(baseline_result, TARGET_TRIGGER_FREQ_RATE, by="benign_escalation_rate")
     fit_at_5 = baseline_fits[point5.percentile]
     crossings = compute_crossings(week_df, fit_at_5.config.thresholds)
-    escalated = escalate_from_crossings(crossings, EscalationRule.ANY, 1)
+    escalated = escalate_from_crossings(crossings, EscalationRule.K_OF_N, 2)
     freq = trigger_frequency(week_df, crossings, escalated)
+
+    print_dead_feature_diagnosis(baseline_fits, point5.percentile)
 
     join_rates = build_join_rate_table(eval_metas, fidelity_metas)
     flagged = join_rates[join_rates["join_rate"] < 0.95]
@@ -168,6 +209,15 @@ def main() -> None:
         print(flagged.to_string(index=False))
 
     delta = per_class_ablation_delta(baseline_result, flow_only_result)
+    low_conf_delta = per_class_ablation_delta(baseline_result, low_conf_result)
+    print("\n=== low-confidence ablation: per-class recall, baseline vs low-conf-included ===")
+    print(
+        low_conf_delta[
+            low_conf_delta["label"].isin(["DoS slowloris", "DoS Slowhttptest"])
+        ].to_string(index=False)
+    )
+    Path("results").mkdir(parents=True, exist_ok=True)
+    low_conf_delta.to_csv("results/low_confidence_ablation_delta.csv", index=False)
 
     write_results(baseline_result, ablations, freq, join_rates, feature_ablation_delta=delta)
     print("\nresults written to results/")

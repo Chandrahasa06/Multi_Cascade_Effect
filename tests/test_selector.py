@@ -198,6 +198,7 @@ class TestSelectorEscalation:
     def test_low_side_threshold_crossing(self):
         config = SelectorConfig(
             thresholds={"fwd_pkt_len_mean": FeatureThreshold(low=50)},
+            rule=EscalationRule.ANY,
         )
         state = two_way_flow(fwd_len=10, bwd_len=200)
         decision = Selector(config).evaluate(state)
@@ -246,7 +247,10 @@ class TestSelectorEscalation:
         src_table.note_flow_start("10.0.0.1", "10.0.0.9", 1, 0)
         src_table.note_flow_start("10.0.0.1", "10.0.0.9", 2, 0)
         src_table.note_flow_start("10.0.0.1", "10.0.0.9", 3, 0)
-        config = SelectorConfig(thresholds={"distinct_dst_ports_per_src": FeatureThreshold(high=2)})
+        config = SelectorConfig(
+            thresholds={"distinct_dst_ports_per_src": FeatureThreshold(high=2)},
+            rule=EscalationRule.ANY,
+        )
         state = two_way_flow()
         decision = Selector(config).evaluate(state, src_table=src_table, now_us=0)
         assert decision.escalate

@@ -1,5 +1,7 @@
 import csv
 
+import pytest
+
 from dataplane.flow_table import KeyMode
 from eval.simulate import extract_day_features
 
@@ -123,3 +125,59 @@ class TestExtractDayFeatures:
         extract_day_features(csv_path, "testday", KeyMode.FIDELITY, cache_dir=cache_dir)
         cached_files = list(cache_dir.glob("*.parquet"))
         assert len(cached_files) == 2
+
+
+class TestPerSourceFeatureSnapshotTiming:
+    def test_early_flow_reflects_its_own_closure_time_not_end_of_file(self, tmp_path):
+        # Same source touches 2 distinct dest ports early (t=0s, t=1s,
+        # both closing cleanly via a two-sided FIN so they leave the
+        # table immediately), then the SAME source appears again much
+        # later (t=201s — past the 60s sliding window) touching a third
+        # port. If per-source features were snapshotted after the whole
+        # file is processed (the bug), the early flows would see the
+        # LATE bucket state (source_table has since rotated past the
+        # early ports) instead of their own historical context.
+        rows = [
+            make_row(
+                **{
+                    "Destination Port": 100,
+                    "Timestamp": "03/07/2017 08:55:58",
+                    "Flow Duration": 1000,
+                    "FIN Flag Count": 2,
+                },
+            ),
+            make_row(
+                **{
+                    "Destination Port": 200,
+                    "Timestamp": "03/07/2017 08:55:59",
+                    "Flow Duration": 1000,
+                    "FIN Flag Count": 2,
+                }
+            ),
+            make_row(
+                **{
+                    "Destination Port": 300,
+                    "Timestamp": "03/07/2017 08:59:19",  # +201s from row 0
+                    "Flow Duration": 1000,
+                    "FIN Flag Count": 2,
+                }
+            ),
+        ]
+        csv_path = tmp_path / "day.csv"
+        write_csv(csv_path, rows)
+
+        df, meta = extract_day_features(
+            csv_path, "testday", KeyMode.EVAL, cache_dir=tmp_path / "cache"
+        )
+        assert meta["flows_total"] == 3  # all three closed via FIN, none merged/lost
+
+        # row 1 (port 200) closes right after row 0 (port 100): at that
+        # instant this source has touched 2 distinct ports.
+        row1_distinct_ports = df.iloc[1]["distinct_dst_ports_per_src"]
+        assert row1_distinct_ports == pytest.approx(2.0, abs=0.3)
+
+        # row 0's OWN snapshot, taken at its own closure (before row 1
+        # even exists), must see exactly 1 distinct port — never more,
+        # regardless of what this source does later.
+        row0_distinct_ports = df.iloc[0]["distinct_dst_ports_per_src"]
+        assert row0_distinct_ports == pytest.approx(1.0, abs=0.3)

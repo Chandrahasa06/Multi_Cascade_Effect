@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
@@ -69,16 +70,60 @@ TWO_SIDED_FEATURES = frozenset(
 )
 
 
+class FeatureKind(str, Enum):
+    """Plain percentile fitting silently breaks for anything with a hard
+    value bound: if benign mass sits exactly at the bound (a boolean's
+    only two values, or a ratio saturating at 0/1 for short flows), the
+    percentile itself lands on that bound, and a plain `>`/`<` comparison
+    can then never cross it — the threshold is fit, looks reasonable, and
+    is structurally uncrossable forever. syn_ratio/rst_ratio/
+    no_response_flag are exactly this: a pure-SYN port scan or an
+    unanswered-SYN probe pins them at their bound, which is the whole
+    signal — and percentile fitting was quietly discarding it.
+
+    CONTINUOUS: ordinary percentile fitting (the default for anything not
+        listed in FEATURE_KINDS below).
+    BOUNDED_RATIO: value lives in [0, 1] and can genuinely saturate at
+        either end (syn_ratio, rst_ratio). Fit with an explicit
+        saturation check (see _fit_bounded).
+    BOOLEAN: value is exactly {0, 1} (no_response_flag). Same fix as
+        BOUNDED_RATIO — a boolean is just a ratio with no interior.
+    """
+
+    CONTINUOUS = "continuous"
+    BOUNDED_RATIO = "bounded_ratio"
+    BOOLEAN = "boolean"
+
+
+FEATURE_KINDS: Dict[str, FeatureKind] = {
+    "no_response_flag": FeatureKind.BOOLEAN,
+    "syn_ratio": FeatureKind.BOUNDED_RATIO,
+    "rst_ratio": FeatureKind.BOUNDED_RATIO,
+}
+
+
+def feature_kind(name: str) -> FeatureKind:
+    return FEATURE_KINDS.get(name, FeatureKind.CONTINUOUS)
+
+
 @dataclass(frozen=True, slots=True)
 class FeatureFittingReport:
     """Per-feature fitting diagnostics. A feature that's undefined (or
     excluded as low-confidence) for most benign flows is a finding about
-    that feature's usability, not a detail to bury in a log line."""
+    that feature's usability, not a detail to bury in a log line — and so
+    is a feature whose fitted threshold turned out to be unfittable
+    because benign mass saturates its hard bound (`saturated=True`) at
+    this percentile. `used`/`excluded_*` and `saturated` are different
+    failures: the first is about whether there was data to fit on at
+    all; the second is about whether a bound made that data unusable
+    regardless of how much of it there was."""
 
     total_flows: int
     excluded_undefined: int
     excluded_low_confidence: int
     used: int
+    kind: str = FeatureKind.CONTINUOUS.value
+    saturated: bool = False
 
     @property
     def excluded_fraction(self) -> float:
@@ -93,6 +138,8 @@ class FeatureFittingReport:
             "excluded_low_confidence": self.excluded_low_confidence,
             "used": self.used,
             "excluded_fraction": self.excluded_fraction,
+            "kind": self.kind,
+            "saturated": self.saturated,
         }
 
 
@@ -109,6 +156,52 @@ def _compute_config_hash(thresholds: Dict[str, FeatureThreshold]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def _fit_unbounded(used_values: np.ndarray, percentile: float, two_sided: bool) -> FeatureThreshold:
+    high = float(np.percentile(used_values, percentile))
+    low = float(np.percentile(used_values, 100.0 - percentile)) if two_sided else None
+    return FeatureThreshold(high=high, low=low)
+
+
+def _fit_bounded_side(used_values: np.ndarray, percentile: float, bound: float) -> Tuple[Optional[float], bool]:
+    """One side (high or low) of a [0, 1]-bounded feature. Returns
+    (threshold_value_or_None, saturated).
+
+    Ordinary percentile fitting is used unless it lands exactly on the
+    theoretical bound — the only case a plain `>`/`<` comparison can
+    never satisfy (nothing can exceed 1.0 or go below 0.0). When that
+    happens there is provably no threshold at this percentile that both
+    fires and respects the false-positive budget: for linear-
+    interpolation percentiles, the computed value can only equal a hard
+    bound exactly when at least the top (100-percentile)% of the data
+    already sits at that bound — i.e. the very existence of saturation
+    means benign mass there already meets or exceeds this percentile's
+    own budget. So: saturated always means unfittable at this
+    percentile, not "maybe, check the rate" — omit the feature and
+    report why, rather than fit a threshold nothing can ever cross.
+    """
+    raw = float(np.percentile(used_values, percentile))
+    if np.isclose(raw, bound):
+        return None, True
+    return raw, False
+
+
+def _fit_bounded(
+    used_values: np.ndarray, percentile: float, two_sided: bool
+) -> Tuple[Optional[FeatureThreshold], bool]:
+    """Fit a feature hard-bounded to [0, 1] (a boolean is just a bound
+    with no interior — see _fit_bounded_side)."""
+    high, saturated_high = _fit_bounded_side(used_values, percentile, 1.0)
+
+    low, saturated_low = None, False
+    if two_sided:
+        low, saturated_low = _fit_bounded_side(used_values, 100.0 - percentile, 0.0)
+
+    saturated = saturated_high or saturated_low
+    if high is None and low is None:
+        return None, saturated
+    return FeatureThreshold(high=high, low=low), saturated
+
+
 def _fit_feature(
     values: np.ndarray,
     low_confidence: np.ndarray,
@@ -116,10 +209,14 @@ def _fit_feature(
     percentile: float,
     two_sided: bool,
     exclude_low_confidence: bool,
+    kind: FeatureKind = FeatureKind.CONTINUOUS,
 ) -> Tuple[Optional[FeatureThreshold], FeatureFittingReport]:
-    """Shared percentile-fitting core. `values` uses NaN for "undefined
-    for this flow" (never 0); `low_confidence` is a same-length bool mask.
-    Both exclusions are counted, never silently folded into the fit."""
+    """Shared fitting core. `values` uses NaN for "undefined for this
+    flow" (never 0); `low_confidence` is a same-length bool mask. Both
+    exclusions are counted, never silently folded into the fit. `kind`
+    selects ordinary percentile fitting (CONTINUOUS) or the
+    saturation-aware rarity fit (BOUNDED_RATIO/BOOLEAN) — see
+    FeatureKind and _fit_bounded."""
     total = len(values)
     undefined_mask = np.isnan(values)
     excluded_undefined = int(undefined_mask.sum())
@@ -132,19 +229,23 @@ def _fit_feature(
 
     used_values = values[(~undefined_mask) & (~low_conf_mask)]
 
+    saturated = False
+    threshold: Optional[FeatureThreshold] = None
+    if len(used_values) > 0:
+        if kind in (FeatureKind.BOUNDED_RATIO, FeatureKind.BOOLEAN):
+            threshold, saturated = _fit_bounded(used_values, percentile, two_sided)
+        else:
+            threshold = _fit_unbounded(used_values, percentile, two_sided)
+
     report = FeatureFittingReport(
         total_flows=total,
         excluded_undefined=excluded_undefined,
         excluded_low_confidence=excluded_low_confidence,
         used=len(used_values),
+        kind=kind.value,
+        saturated=saturated,
     )
-
-    if len(used_values) == 0:
-        return None, report
-
-    high = float(np.percentile(used_values, percentile))
-    low = float(np.percentile(used_values, 100.0 - percentile)) if two_sided else None
-    return FeatureThreshold(high=high, low=low), report
+    return threshold, report
 
 
 def fit_thresholds(
@@ -155,8 +256,8 @@ def fit_thresholds(
     now_us_by_flow: Optional[Sequence[int]] = None,
     percentile: float = DEFAULT_PERCENTILE,
     two_sided_features: Set[str] = TWO_SIDED_FEATURES,
-    rule: EscalationRule = EscalationRule.ANY,
-    k: int = 1,
+    rule: EscalationRule = EscalationRule.K_OF_N,
+    k: int = 2,
     exclude_low_confidence: bool = True,
 ) -> FittingResult:
     """Fit benign-only percentile thresholds for every Tier-1 feature
@@ -212,6 +313,7 @@ def fit_thresholds(
             percentile=percentile,
             two_sided=feature_name in two_sided_features,
             exclude_low_confidence=exclude_low_confidence,
+            kind=feature_kind(feature_name),
         )
         reports[feature_name] = report
         if threshold is not None:
@@ -232,8 +334,8 @@ def fit_thresholds_from_frame(
     feature_names: Optional[Sequence[str]] = None,
     percentile: float = DEFAULT_PERCENTILE,
     two_sided_features: Set[str] = TWO_SIDED_FEATURES,
-    rule: EscalationRule = EscalationRule.ANY,
-    k: int = 1,
+    rule: EscalationRule = EscalationRule.K_OF_N,
+    k: int = 2,
     exclude_low_confidence: bool = True,
 ) -> FittingResult:
     """Same fitting core as :func:`fit_thresholds`, but sourced from a
@@ -274,6 +376,7 @@ def fit_thresholds_from_frame(
             percentile=percentile,
             two_sided=feature_name in two_sided_features,
             exclude_low_confidence=exclude_low_confidence,
+            kind=feature_kind(feature_name),
         )
         reports[feature_name] = report
         if threshold is not None:
