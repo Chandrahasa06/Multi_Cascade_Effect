@@ -1,28 +1,6 @@
-# Virtual environment
+data/
 venv/
-.venv/
-env/
-
-# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Logs
-*.log
-logs/
-
-# Environment variables
+*.pyc
+results/
 .env
-.env.*
-
-# VS Code
-.vscode/
-
-# pytest
-.pytest_cache/
-
-# Build files
-build/
-dist/
-*.egg-info/
