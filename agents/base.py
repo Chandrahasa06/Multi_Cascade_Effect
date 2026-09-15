@@ -67,20 +67,34 @@ RPM_LIMIT = 12
 #: planned ~1500/day was wrong by ~75x for gemini-3.5-flash specifically,
 #: which hit a live 429 with quotaId
 #: "GenerateRequestsPerDayPerProjectPerModel-FreeTier", quotaValue 20).
-#: gemini-3.5-flash-lite (the default -- see above) did NOT hit this
-#: wall after 177 successful calls in one day (updated from an earlier
-#: 89-call checkpoint, still climbing with zero real 429s); its exact
-#: daily cap is intentionally not pinned down further (finding the true
-#: ceiling would cost real quota for no operational benefit once
-#: "clearly high enough" is established). 400 is a placeholder
-#: comfortably above the observed floor, not a measured ceiling --
-#: tighten (or raise) if a real daily 429 is ever observed for this
-#: model; that error is handled cleanly regardless (see
-#: _is_daily_quota_error: fails fast, no wasted retries, since a
-#: same-day cap can't be waited out). Unknown/other models fall back to
-#: the harsher 20/day figure actually measured for gemini-3.5-flash,
-#: rather than assuming this model's better number generalizes.
-DAILY_QUOTA_BY_MODEL = {"gemini-3.5-flash-lite": 400, "gemini-3.5-flash": 20}
+#: gemini-3.5-flash-lite's cap was pinned down for real on 2026-09-14: a
+#: live 429 during a resumed run named quotaValue 500 explicitly
+#: (previously just "comfortably above 400, not pinned down further" --
+#: 400 was a placeholder, not a measurement). NOTE, not yet resolved:
+#: that 429 fired after this process's own tracked count for the new
+#: UTC day was only 104 (well under even the old 400 guess), following
+#: a prior UTC day that had reached 397 -- 397+104=501, just over 500.
+#: This strongly suggests the real quota window does NOT reset at UTC
+#: midnight the way `_today()` assumes (a different reset boundary, e.g.
+#: US Pacific midnight, would explain the two days' counts effectively
+#: summing against one server-side window instead of resetting between
+#: them). The 500 ceiling below is real; the exact reset boundary isn't
+#: -- until it's pinned down, DAILY_REFUSE_HEADROOM is the only thing
+#: standing between a resumed run and repeating this same live 429
+#: (harmless either way, see _is_daily_quota_error: fails fast, no
+#: wasted retries). Unknown/other models fall back to the harsher 20/day
+#: figure actually measured for gemini-3.5-flash, rather than assuming
+#: this model's better number generalizes.
+#:
+#: SECOND confirming data point, same day: a fresh call attempt at
+#: 2026-09-14 06:12 UTC hit the identical live 429 with this process's
+#: tracked count at only 104/500 -- not a one-off. 06:12 UTC is ~48 min
+#: before 07:00 UTC, which is US Pacific midnight during PDT (UTC-7) --
+#: a live Pacific-midnight-boundary hypothesis, not yet confirmed by a
+#: successful call just after that time. If a call succeeds shortly
+#: after 07:00 UTC on a day when it was refused just before, that
+#: confirms the boundary; record the result here either way once known.
+DAILY_QUOTA_BY_MODEL = {"gemini-3.5-flash-lite": 500, "gemini-3.5-flash": 20}
 _UNKNOWN_MODEL_DAILY_QUOTA = 20
 DAILY_WARN_HEADROOM = 15  # warn once within this many calls of the cap
 DAILY_REFUSE_HEADROOM = 3  # refuse once within this many calls of the cap

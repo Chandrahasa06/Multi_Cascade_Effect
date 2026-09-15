@@ -27,7 +27,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -71,23 +71,36 @@ TWO_SIDED_FEATURES = frozenset(
 
 
 class FeatureKind(str, Enum):
-    """Plain percentile fitting silently breaks for anything with a hard
-    value bound: if benign mass sits exactly at the bound (a boolean's
-    only two values, or a ratio saturating at 0/1 for short flows), the
-    percentile itself lands on that bound, and a plain `>`/`<` comparison
-    can then never cross it — the threshold is fit, looks reasonable, and
-    is structurally uncrossable forever. syn_ratio/rst_ratio/
-    no_response_flag are exactly this: a pure-SYN port scan or an
-    unanswered-SYN probe pins them at their bound, which is the whole
-    signal — and percentile fitting was quietly discarding it.
+    """`kind` is still recorded per feature (diagnostic metadata, and one
+    real fitting decision — see BOOLEAN below) but as of the generic
+    saturation fix it no longer selects *how* a feature is fit: every
+    feature goes through the same saturation-aware core
+    (:func:`_fit_side`), continuous or not. Percentile fitting silently
+    breaks whenever fit-half mass piles up at a feature's own extreme
+    value: the percentile lands exactly there, and a plain `>`/`<`
+    comparison can then never cross it — the threshold is fit, looks
+    reasonable, and is structurally uncrossable forever. This has now
+    been hit three separate ways in this project: a boolean's only
+    "true" value (`no_response_flag`), a [0,1] ratio saturating at its
+    bound (`syn_ratio`/`rst_ratio`), and — the one the old bounded-only
+    check missed entirely — an *unbounded* count feature
+    (`flows_per_src` on the CSV adapter) whose per-source accounting
+    piles 14.2% of a day's benign mass onto a single tied maximum. One
+    mechanism now covers all three; `kind` only still matters for
+    deciding what to do once saturation IS detected (see
+    RARITY_MAX_DISTINCT_* and _fit_feature below).
 
-    CONTINUOUS: ordinary percentile fitting (the default for anything not
-        listed in FEATURE_KINDS below).
+    CONTINUOUS: no special handling beyond the generic saturation check
+        (the default for anything not listed in FEATURE_KINDS below).
     BOUNDED_RATIO: value lives in [0, 1] and can genuinely saturate at
-        either end (syn_ratio, rst_ratio). Fit with an explicit
-        saturation check (see _fit_bounded).
-    BOOLEAN: value is exactly {0, 1} (no_response_flag). Same fix as
-        BOUNDED_RATIO — a boolean is just a ratio with no interior.
+        either end (syn_ratio, rst_ratio). No different fitting path
+        from CONTINUOUS any more — kept as a label for reporting/tests.
+    BOOLEAN: value is exactly {0, 1} (no_response_flag). The one place
+        `kind` still changes behavior: a saturated boolean is always
+        EXCLUDED, never rarity-fit — its value space is closed to two
+        states, so a "common value set" built from training data can
+        never flag anything a boolean couldn't already take, making
+        rarity-fit provably useless for this kind specifically.
     """
 
     CONTINUOUS = "continuous"
@@ -102,11 +115,34 @@ FEATURE_KINDS: Dict[str, FeatureKind] = {
     # bounded in (0, 1], saturating at 1.0 for a perfectly regular
     # beacon (every IAT identical) — see selector._iat_regularity.
     "flow_iat_regularity": FeatureKind.BOUNDED_RATIO,
+    # per-source ratios: numerator is a sub-count of the denominator
+    # (distinct ports/ips touched, or SYNs-without-response, can't exceed
+    # flows_per_src) so each is bounded in [0, 1] by construction, same
+    # saturation risk as syn_ratio/rst_ratio above — see
+    # selector.compute_src_features.
+    "port_diversity_ratio": FeatureKind.BOUNDED_RATIO,
+    "unanswered_syn_ratio": FeatureKind.BOUNDED_RATIO,
+    "dst_concentration": FeatureKind.BOUNDED_RATIO,
 }
 
 
 def feature_kind(name: str) -> FeatureKind:
     return FEATURE_KINDS.get(name, FeatureKind.CONTINUOUS)
+
+
+#: A saturated feature is eligible for a rarity fit (value-membership,
+#: not magnitude) instead of outright exclusion when it has few enough
+#: distinct states for membership to be meaningful. Both caps must hold
+#: — the absolute one alone is fooled by a huge fit-half, the ratio one
+#: alone by a tiny one. Calibrated against this project's own discrete-
+#: but-not-boolean features: `flows_per_src` on the CSV adapter (191
+#: distinct of 264,959 informative rows, ~0.07%) and
+#: `init_win_bytes_fwd`/`bwd` (on the order of 4,000-5,600 distinct of
+#: 170-330K informative rows, ~1-3%) — vs. a genuinely continuous
+#: feature (e.g. `flow_iat_mean` under real microsecond timing), whose
+#: informative values are close to unique.
+RARITY_MAX_DISTINCT_ABS = 10_000
+RARITY_MAX_DISTINCT_RATIO = 0.05
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,11 +151,28 @@ class FeatureFittingReport:
     excluded as low-confidence) for most benign flows is a finding about
     that feature's usability, not a detail to bury in a log line — and so
     is a feature whose fitted threshold turned out to be unfittable
-    because benign mass saturates its hard bound (`saturated=True`) at
+    because benign mass saturates its own extreme (`saturated=True`) at
     this percentile. `used`/`excluded_*` and `saturated` are different
     failures: the first is about whether there was data to fit on at
-    all; the second is about whether a bound made that data unusable
-    regardless of how much of it there was."""
+    all; the second is about whether saturation made that data unusable
+    regardless of how much of it there was.
+
+    `action` is the outcome once saturation is (or isn't) detected —
+    "kept" (ordinary threshold, the common case), "excluded" (dropped
+    for this operating point), or "rarity_fit" (value-membership
+    instead of magnitude) — always present, so a saturated feature's
+    fate is visible without cross-referencing `saturated` and whether
+    the feature shows up in `SelectorConfig.thresholds` separately.
+    `feature_max`/`feature_min`/`tied_mass_high`/`tied_mass_low` are the
+    generic saturation diagnostics themselves — the exact numbers behind
+    the `action`, not just the boolean. `rarity_coverage`, when
+    `action == "rarity_fit"`, is the fraction of the fit-half's own used
+    values that landed in the common set — a coverage near 1.0 is a
+    visible warning that this particular rarity fit has little room left
+    to flag anything within the training distribution (it can still flag
+    genuinely novel values), reported rather than silently upgraded to
+    "excluded" so the report itself carries that judgment call, not the
+    code."""
 
     total_flows: int
     excluded_undefined: int
@@ -127,6 +180,15 @@ class FeatureFittingReport:
     used: int
     kind: str = FeatureKind.CONTINUOUS.value
     saturated: bool = False
+    action: str = "kept"
+    threshold_high: Optional[float] = None
+    threshold_low: Optional[float] = None
+    feature_max: Optional[float] = None
+    feature_min: Optional[float] = None
+    tied_mass_high: Optional[float] = None
+    tied_mass_low: Optional[float] = None
+    n_distinct: Optional[int] = None
+    rarity_coverage: Optional[float] = None
 
     @property
     def excluded_fraction(self) -> float:
@@ -143,6 +205,15 @@ class FeatureFittingReport:
             "excluded_fraction": self.excluded_fraction,
             "kind": self.kind,
             "saturated": self.saturated,
+            "action": self.action,
+            "threshold_high": self.threshold_high,
+            "threshold_low": self.threshold_low,
+            "feature_max": self.feature_max,
+            "feature_min": self.feature_min,
+            "tied_mass_high": self.tied_mass_high,
+            "tied_mass_low": self.tied_mass_low,
+            "n_distinct": self.n_distinct,
+            "rarity_coverage": self.rarity_coverage,
         }
 
 
@@ -159,50 +230,83 @@ def _compute_config_hash(thresholds: Dict[str, FeatureThreshold]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _fit_unbounded(used_values: np.ndarray, percentile: float, two_sided: bool) -> FeatureThreshold:
-    high = float(np.percentile(used_values, percentile))
-    low = float(np.percentile(used_values, 100.0 - percentile)) if two_sided else None
-    return FeatureThreshold(high=high, low=low)
+@dataclass(frozen=True, slots=True)
+class _SideFit:
+    """One side (high or low) of a saturation-aware percentile fit."""
+
+    value: float
+    extreme: float
+    tied_mass_at_extreme: float
+    saturated: bool
 
 
-def _fit_bounded_side(used_values: np.ndarray, percentile: float, bound: float) -> Tuple[Optional[float], bool]:
-    """One side (high or low) of a [0, 1]-bounded feature. Returns
-    (threshold_value_or_None, saturated).
+def _fit_side(used_values: np.ndarray, np_percentile: float, budget: float, direction: str) -> _SideFit:
+    """Fit one side of a threshold and check whether it's reachable.
+    `np_percentile` is what gets handed to `np.percentile` (== the
+    caller's percentile for the high side, `100 - percentile` for the
+    low side); `budget` is always `(100 - percentile) / 100` for BOTH
+    sides — the same intended false-positive rate either direction,
+    independent of which `np_percentile` value produces it.
 
-    Ordinary percentile fitting is used unless it lands exactly on the
-    theoretical bound — the only case a plain `>`/`<` comparison can
-    never satisfy (nothing can exceed 1.0 or go below 0.0). When that
-    happens there is provably no threshold at this percentile that both
-    fires and respects the false-positive budget: for linear-
-    interpolation percentiles, the computed value can only equal a hard
-    bound exactly when at least the top (100-percentile)% of the data
-    already sits at that bound — i.e. the very existence of saturation
-    means benign mass there already meets or exceeds this percentile's
-    own budget. So: saturated always means unfittable at this
-    percentile, not "maybe, check the rate" — omit the feature and
-    report why, rather than fit a threshold nothing can ever cross.
+    Saturated means the threshold is provably unreachable by a
+    `>`/`<` comparison: either it lands exactly on this feature's own
+    observed extreme (nothing in the fit-half exceeds a true maximum /
+    goes below a true minimum), or the mass tied AT that extreme already
+    exceeds the percentile's own false-positive budget — the general
+    form of the old bounded-ratio check (which only looked for the
+    *theoretical* 0/1 bound): a percentile can only land exactly on the
+    extreme once enough mass sits there, so checking the tied mass
+    directly catches near-misses (e.g. floating-point interpolation)
+    that an exact `np.isclose(raw, extreme)` alone could paper over.
+
+    `n_distinct > 1` guards a genuinely constant feature (every used
+    value identical, e.g. a boolean that never once fired True in
+    training): 100% of mass necessarily sits "at the extreme" then, but
+    that's not the saturation pathology — a plain `>`/`<` at that
+    constant value still correctly separates it from anything different
+    that attack data might present. The pathology needs OTHER values
+    genuinely present too, with the tied mass crowding out the tail
+    anyway.
+
+    The tied-mass condition additionally requires at least 2 flows
+    actually AT the extreme (genuine duplication), not just a high
+    *fraction* — with a small fit-half, the single largest of many
+    otherwise-unique values trivially represents a large share of the
+    sample (10 rows, all distinct: the max is "10% of the data" by
+    construction, with nothing tied there at all) and must not read as
+    saturation. Real saturation needs repeated identical observations
+    piling up, which is what actually blocks a `>`/`<` comparison from
+    separating anything — a unique top value never does.
     """
-    raw = float(np.percentile(used_values, percentile))
-    if np.isclose(raw, bound):
-        return None, True
-    return raw, False
+    raw = float(np.percentile(used_values, np_percentile))
+    extreme = float(used_values.max()) if direction == "high" else float(used_values.min())
+    n_distinct = int(np.unique(used_values).size)
+    at_extreme = np.isclose(used_values, extreme)
+    count_at_extreme = int(at_extreme.sum())
+    tied_mass_at_extreme = float(count_at_extreme / len(used_values))
+    saturated = n_distinct > 1 and (
+        bool(np.isclose(raw, extreme)) or (count_at_extreme >= 2 and tied_mass_at_extreme > budget)
+    )
+    return _SideFit(value=raw, extreme=extreme, tied_mass_at_extreme=tied_mass_at_extreme, saturated=saturated)
 
 
-def _fit_bounded(
-    used_values: np.ndarray, percentile: float, two_sided: bool
-) -> Tuple[Optional[FeatureThreshold], bool]:
-    """Fit a feature hard-bounded to [0, 1] (a boolean is just a bound
-    with no interior — see _fit_bounded_side)."""
-    high, saturated_high = _fit_bounded_side(used_values, percentile, 1.0)
-
-    low, saturated_low = None, False
-    if two_sided:
-        low, saturated_low = _fit_bounded_side(used_values, 100.0 - percentile, 0.0)
-
-    saturated = saturated_high or saturated_low
-    if high is None and low is None:
-        return None, saturated
-    return FeatureThreshold(high=high, low=low), saturated
+def _fit_rarity(used_values: np.ndarray, budget: float) -> Tuple[FrozenSet[float], float]:
+    """Value-membership fit: values individually covering at least
+    `budget` (== the percentile's own false-positive rate) of
+    `used_values` are "common"; anything else — including values never
+    seen during fitting at all — is rare enough to escalate on. Returns
+    (common_values, coverage), coverage being the fraction of
+    `used_values` whose own value landed in the common set: reported
+    directly (see FeatureFittingReport) rather than silently overridden
+    when it's high, so a near-useless rarity fit (little room left to
+    flag anything within the training distribution) is visible in the
+    report instead of hidden by a code-side judgment call."""
+    uniq, counts = np.unique(used_values, return_counts=True)
+    freqs = counts / len(used_values)
+    common_mask = freqs >= budget
+    common = frozenset(float(v) for v in uniq[common_mask])
+    coverage = float(counts[common_mask].sum() / len(used_values))
+    return common, coverage
 
 
 def _fit_feature(
@@ -216,10 +320,17 @@ def _fit_feature(
 ) -> Tuple[Optional[FeatureThreshold], FeatureFittingReport]:
     """Shared fitting core. `values` uses NaN for "undefined for this
     flow" (never 0); `low_confidence` is a same-length bool mask. Both
-    exclusions are counted, never silently folded into the fit. `kind`
-    selects ordinary percentile fitting (CONTINUOUS) or the
-    saturation-aware rarity fit (BOUNDED_RATIO/BOOLEAN) — see
-    FeatureKind and _fit_bounded."""
+    exclusions are counted, never silently folded into the fit.
+
+    Every feature goes through the same saturation-aware fit
+    (:func:`_fit_side`) regardless of `kind` — see FeatureKind's
+    docstring for why the old kind-based branch (bounded vs. unbounded
+    fitting) was itself the bug (it only protected features hand-listed
+    in FEATURE_KINDS, missing e.g. `flows_per_src` entirely). `kind`
+    still decides one thing: whether a saturated feature is eligible for
+    a rarity fit at all (BOOLEAN never is — see FeatureKind) — cardinality
+    (RARITY_MAX_DISTINCT_*) decides it for everything else.
+    """
     total = len(values)
     undefined_mask = np.isnan(values)
     excluded_undefined = int(undefined_mask.sum())
@@ -232,13 +343,36 @@ def _fit_feature(
 
     used_values = values[(~undefined_mask) & (~low_conf_mask)]
 
-    saturated = False
     threshold: Optional[FeatureThreshold] = None
+    saturated = False
+    action = "kept"
+    n_distinct: Optional[int] = None
+    rarity_coverage: Optional[float] = None
+    high_fit: Optional[_SideFit] = None
+    low_fit: Optional[_SideFit] = None
+
     if len(used_values) > 0:
-        if kind in (FeatureKind.BOUNDED_RATIO, FeatureKind.BOOLEAN):
-            threshold, saturated = _fit_bounded(used_values, percentile, two_sided)
+        n_distinct = int(np.unique(used_values).size)
+        budget = (100.0 - percentile) / 100.0
+        high_fit = _fit_side(used_values, percentile, budget, "high")
+        low_fit = _fit_side(used_values, 100.0 - percentile, budget, "low") if two_sided else None
+        saturated = high_fit.saturated or (low_fit.saturated if low_fit is not None else False)
+
+        if not saturated:
+            threshold = FeatureThreshold(high=high_fit.value, low=(low_fit.value if low_fit else None))
         else:
-            threshold = _fit_unbounded(used_values, percentile, two_sided)
+            eligible_for_rarity = (
+                kind != FeatureKind.BOOLEAN
+                and n_distinct <= RARITY_MAX_DISTINCT_ABS
+                and n_distinct <= RARITY_MAX_DISTINCT_RATIO * len(used_values)
+            )
+            if eligible_for_rarity:
+                common, rarity_coverage = _fit_rarity(used_values, budget)
+                threshold = FeatureThreshold(common_values=common)
+                action = "rarity_fit"
+            else:
+                threshold = None
+                action = "excluded"
 
     report = FeatureFittingReport(
         total_flows=total,
@@ -247,6 +381,15 @@ def _fit_feature(
         used=len(used_values),
         kind=kind.value,
         saturated=saturated,
+        action=action,
+        threshold_high=(high_fit.value if high_fit else None),
+        threshold_low=(low_fit.value if low_fit else None),
+        feature_max=(high_fit.extreme if high_fit else None),
+        feature_min=(low_fit.extreme if low_fit else None),
+        tied_mass_high=(high_fit.tied_mass_at_extreme if high_fit else None),
+        tied_mass_low=(low_fit.tied_mass_at_extreme if low_fit else None),
+        n_distinct=n_distinct,
+        rarity_coverage=rarity_coverage,
     )
     return threshold, report
 

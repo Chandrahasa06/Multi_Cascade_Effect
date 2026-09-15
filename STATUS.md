@@ -21,8 +21,9 @@ this file is about what's actually true *right now*.
 - `eval/labels_pcap.py` / `eval/simulate_pcap.py` / `eval/run_pcap_sweep.py` — PCAP-path peers of `eval/labels.py`/`eval/simulate.py`/the sweep orchestration in `eval/run_all.py`: Friday's identity-first session join (real packets have no CSV row to key on), PCAP-path simulate+cache, fit/sweep against real timing. See "PCAP-based fitting, sweep, and Friday session labeling" below.
 - `controlplane/record.py` / `controlplane/extractor.py` — escalated-flow → full CICFlowMeter feature extraction and allow-list anonymisation. See "Control plane: CICFlowMeter extraction" below.
 - `dataplane/selector.py`'s `flow_iat_regularity` (Bot beaconing hypothesis, tested and falsified — see "Bot IAT-regularity experiment" below) and `Selector.evaluate_features` (reusable escalation-decision core for callers holding already-snapshotted features, e.g. the record-sample generator, without re-deriving per-source features from a stale `SrcTable` — the exact bug already fixed once in this project).
-- `agents/` — the five-agent zero-day review pipeline (A1 evidence → A2 behaviour → A3 hypotheses, A4 blind replica, A5 verdict), plus `controlplane/reference.py` (Monday benign reference distribution) and `eval/run_agent_pipeline.py` (cost-controlled runner). See "Five-agent zero-day review pipeline" below — stop points 1-2 done, stop point 3 (the full 200-record run) not started.
-- `tests/` — 435 tests, all passing, across all of the above.
+- `agents/` — the five-agent zero-day review pipeline (A1 evidence → A2 behaviour → A3 hypotheses, A4 blind replica, A5 verdict), plus `controlplane/reference.py` (Monday benign reference distribution) and `eval/run_agent_pipeline.py` (cost-controlled runner). See "Five-agent zero-day review pipeline" below — stop points 1-2 done; stop point 3 (the full 200-record run, re-stratified) is **159/200**, parked on a live daily-quota 429 that fires well under the tracked count (see "Architecture doc, self-report coverage gap, PCAP counts, threshold sweep" near the end of this file for the current best guess why).
+- `eval/ablation_v4.py` / `eval/ablation_v200.py` / `eval/threshold_sweep.py` / `eval/pcap_escalation_counts.py` / `eval/presentation_figures.py` — zero-API-call re-analysis of already-written pipeline/sweep results (detector-vs-agent comparisons, verdict-threshold optimality, exact PCAP escalation counts, poster/presentation figures). `eval/fault_injection.py` / `eval/run_fault_injection.py` / `eval/poster_figures.py` — the fault-injection poster study (built and unit-tested; the one real run attempted so far is blocked on quota, see below). `results/ARCHITECTURE.md` — full as-implemented pipeline description (topology, verbatim prompts, schemas, trust formula), read fresh from code on request.
+- `tests/` — 471 tests, all passing, across all of the above.
 
 ## Current state of results — mostly invalidated, re-run in progress
 
@@ -900,21 +901,26 @@ retry budget and escape as a raw `httpx.ConnectError` -- hit this live,
 mid-run) so any unexpected failure stops the run cleanly with a
 "rerun to resume" message instead of a traceback.
 
-Progress as of last run: **139/200 unique records** (DDoS 50/50,
-BENIGN 69/70 -- one record failing A3 schema validation on retry,
-PortScan 20/50, Bot 0/30), run in DDoS -> BENIGN -> PortScan -> Bot
-order per instruction. Daily quota (`gemini-3.5-flash-lite`, 400/day)
-is the binding constraint; `eval/run_agent_pipeline.py` and
-`eval/run_baseline_pipeline.py` (the still-outstanding single-LLM
-baseline, `agents/baseline.py` / `BaselineResponse` / `baseline_v2`
-prompt -- now includes the same empirical grounding block A1/A3/A4/A5
-get, asks directly for a continuous `benign_plausibility` instead of a
-categorical verdict, so it's head-to-head comparable to A5) both resume
-for free via cache -- rerun the same command after each UTC quota
-reset until both are done, then re-run `eval/ablation_v200.py`
-(the n=200 successor to `ablation_v4.py`: adds the baseline comparison,
-a full operating-point sweep instead of just 0%-FPR, and per-class
-trust/chain_vs_independent breakdowns).
+Progress: **139/200** the first time this section was written, **158/200
+and climbing** as of this update (DDoS 50/50, BENIGN 70/70, PortScan
+38/50, Bot 0/30) -- the run is live in the background right now (resumed
+after a UTC quota reset; daily count 94+/400 this cycle), run in DDoS ->
+BENIGN -> PortScan -> Bot order per instruction. One BENIGN record that
+failed A3 schema validation on the first pass (see prior paragraph)
+succeeded on a later retry, hence 70/70 not 69/70. Daily quota
+(`gemini-3.5-flash-lite`, 400/day) is the binding constraint;
+`eval/run_agent_pipeline.py` and `eval/run_baseline_pipeline.py` (the
+still-outstanding single-LLM baseline, `agents/baseline.py` /
+`BaselineResponse` / `baseline_v2` prompt -- now includes the same
+empirical grounding block A1/A3/A4/A5 get, asks directly for a
+continuous `benign_plausibility` instead of a categorical verdict, so
+it's head-to-head comparable to A5) both resume for free via cache --
+rerun the same command after each UTC quota reset until both are done,
+then re-run `eval/ablation_v200.py` (the n=200 successor to
+`ablation_v4.py`: adds the baseline comparison, a full operating-point
+sweep instead of just 0%-FPR, and per-class trust/chain_vs_independent
+breakdowns) -- see the caught-and-fixed bug in the next section, numbers
+computed with `ablation_v200.py` before that fix are wrong.
 
 ## Self-reported trust triad + fault-injection poster study (built, not yet run)
 
@@ -1040,3 +1046,784 @@ than finishing Bot's last 30 records in the 200-record run above --
 Bot is already a characterised limitation from four independent
 confirmations (PCAP-vs-CSV sweep, IAT-regularity experiment, round-4
 agent pipeline, and this ablation's own mechanical-detector check).
+
+## Presentation figures + summary (built, zero API calls)
+
+Separate, time-boxed deliverable for an upcoming presentation (2-4 day
+deadline): `eval/presentation_figures.py` produces five 300dpi PNGs into
+`results/figures/` plus `results/PRESENTATION_SUMMARY.md` (one section
+per finding, headline number + n + plain language each), entirely from
+already-written results -- no new API calls, run alongside the still-
+live 200-record pipeline run in the background.
+
+**Fig 1 (data-plane recall vs. escalation) required regenerating the
+step-1 sweep first.** The CSVs already on disk
+(`results/recall_curve.csv`, `results/summary.md`, etc., dated Sep 9)
+predate the two fitting bugfixes in "Bugs just fixed" above and read
+PortScan recall as ~0.02-0.14% -- the bug's own signature, not a
+finding, and already flagged as stale in this file. Regenerated via
+`eval.run_all_extractions` (all 8 CICIDS2017 days x 2 key modes, current
+`FEATURE_SCHEMA_VERSION="4"` -- forces fresh extraction since the CSV-
+path cache only had features2/features3 on disk, ~35 min total, pure
+data-plane compute) then `eval.run_all` (fit+sweep+write, fast once
+cached). **Cross-checked against this file's own already-validated
+PCAP-vs-CSV comparison table (the "PCAP-based fitting..." section
+above) and matches exactly** -- Bot 2.7%/3.0%/3.3% and PortScan
+0.14%/0.47%/0.77% at 1%/5%/10% benign rate, confirming the regeneration
+is correct, not just different. PortScan's low CSV-path recall is real
+and already-documented (CSV-synthesized timing can't carry the fine-
+grained signal PortScan needs -- the identical selector gets ~99.7% on
+real PCAP captures per that same section), not a new problem.
+
+**A second real bug, caught while building Fig 3:**
+`eval/ablation_v200.py::at_matched_benign_fpr` picked the wrong end of
+the threshold sweep for "low-side" detectors (`close_to_observed_count`,
+and `benign_plausibility` for both the full pipeline and the baseline)
+-- it always chose the *smallest* threshold in the sweep regardless of
+which direction that detector's escalation rule actually moves in,
+which for these three detectors is exactly the dataset's own minimum
+observed value: at that point nothing is strictly below it, so BENIGN
+and every attack class simultaneously read 0% recall, independent of
+what was actually achievable within the FPR budget. `nn_dist`/`combined`
+(the other direction) were unaffected and already correct. Fixed by
+making the function direction-aware (`direction="high"|"low"`, picking
+`candidates[0]` vs `candidates[-1]` respectively) -- documented in the
+function's own docstring since this is exactly the kind of bug that's
+invisible unless you already know to check. Any number quoting
+`close_to_observed_count`/`benign_plausibility` recall from
+`ablation_v200.py` before this fix is wrong; `ablation_v4_report.md`
+(the earlier, hand-inspected n=20 report) was never affected since it
+didn't use this function.
+
+Figures 2-5 read `results/agent_pipeline_200.jsonl` directly and are
+current as of whenever last run -- **159/200** as this section is
+written (BENIGN 70/70, DDoS 50/50, PortScan 39/50, Bot 0/30 -- Bot not
+shown in any figure, nothing to show yet). Every input path is a CLI
+flag (`--pipeline`, `--manifest`, `--recall-curve`,
+`--per-class-benign-rate`, `--out-dir`); the defaults already point at
+the same files the pipeline run appends to in place, so re-running with
+no arguments at all picks up however many records have landed by then --
+`python -m eval.presentation_figures` is the full regeneration command,
+safe to run again once the remaining ~41 records (11 PortScan + 30 Bot)
+land. The run stopped for today at 159/200 on a LIVE 429 even though
+this process's own tracked count was only 104/400 for the (UTC) day --
+the 429 body named the real cap explicitly, quotaValue 500, and the
+mismatch points at a quota-window reset boundary that isn't UTC
+midnight the way this project assumed; see `agents/base.py`'s
+`DAILY_QUOTA_BY_MODEL` comment (now 500, was a 400 placeholder) for the
+full note. Not investigated further tonight -- rerunning immediately
+would likely just repeat the same live 429, since the server-side
+window is evidently still the one that's exhausted.
+
+Headline findings (see `PRESENTATION_SUMMARY.md` for the full plain-
+language writeup): DDoS is the one class the data-plane selector alone
+recalls well (~62-64%) with no agent involvement; PortScan and DDoS both
+show real `benign_plausibility` overlap with BENIGN rather than clean
+separation; the full agent pipeline beats every purely-mechanical
+detector combination at a realistic (5%) benign-FPR budget, and at
+`nn_dist`'s own 0%-FPR threshold it catches 36 real attacks (31 DDoS +
+5 PortScan) that raw distance misses entirely, at the cost of reading 23
+true-benign records as more suspicious than distance does; A2's
+corroboration score (V=0.19) is the weakest link of any agent, uniform
+across every class; and the sequential chain underperforms A4's blind
+replica in ~70% of records, again uniform across classes -- if anything
+worse on PortScan (79%) than DDoS/BENIGN. None of this is new signal
+inconsistent with earlier n=20 findings; it's the same story confirmed
+at a larger, still-growing n.
+
+## Architecture doc, self-report coverage gap, PCAP counts, threshold sweep
+
+Four more zero-API-call deliverables since the above, plus one blocked
+real-cost run. Main pipeline run is still parked at **159/200** (DDoS
+50/50, BENIGN 70/70, PortScan 39/50, Bot 0/30) -- not resumed in any of
+this work.
+
+**`results/ARCHITECTURE.md`**: full as-implemented description of the
+five-agent pipeline, read fresh from the current code (not from memory
+or this file) at the user's explicit request -- agent topology (ASCII
+diagram), all five system prompts verbatim at current version
+(`a1_evidence_v5`/`a2_behaviour_v2`/`a3_hypotheses_v5`/
+`a4_replication_v5`/`a5_verdict_v5`), exactly what context each agent
+receives (A2 gets no trigger reasons/grounding block/CALIBRATION_NOTE at
+all -- the narrowest-scoped agent; A5 never sees the raw grounding block,
+only a per-hypothesis derivative of it), output schemas, the trust
+formula with weights, verdict-threshold derivation, and eight
+in-code-documented divergences from an earlier design (A5's verdict was
+originally categorical; hypotheses originally used bare
+`referenced_features` instead of checkable ranges; empirical grounding
+against real benign traffic didn't originally exist; etc. -- each
+citation sourced from an explicit "Fix N"/"redesign spec"/"replaces the
+earlier X" comment already in the code, not inferred). **One finding
+worth carrying into the poster/presentation directly: the new
+self-reported confidence/evidence_support/verification triad is NOT
+wired into `agents/trust.py`'s own C/E/V/T formula at all** (except A5's
+`confidence`) -- two parallel trust systems currently coexist without
+touching each other.
+
+**Self-report coverage in the 159-record run is much thinner than it
+looked.** Checked directly: only **20/159 records** (indices 139-158,
+i.e. records processed after the schema bump mid-run) have the
+self-reported triad on all five agents; the original 139 have it on
+none, all-or-nothing per record (the cache key changed with the prompt
+version, so there's no partial state). Worse, those 20 are **19
+PortScan + 1 BENIGN, zero DDoS, zero Bot** -- an artifact of DDoS/BENIGN
+having already finished before the resume that happened to land after
+the schema bump. Added two figures to `eval/presentation_figures.py`
+anyway (fig6: self-reported trust vs. agent stage, single line since no
+fault-injection conditions exist yet; fig7: self-reported
+confidence-verification gap vs. decision error) and ran them --
+**fig7 came back degenerate**: all 20 records got the correct verdict
+(0 decision errors), so the fitted line is exactly `y=0, R²=0`. Not a
+bug -- it's the direct consequence of this pipeline handling PortScan
+almost perfectly (mean `benign_plausibility` 0.10, tight spread, see
+Finding 2 in `PRESENTATION_SUMMARY.md`), so a PortScan-only slice has no
+errors for the gap to explain. Recommended dropping fig7 from the
+deck until DDoS records exist in the self-reported subset (DDoS is
+where the pipeline is sometimes actually wrong).
+
+**`eval/pcap_escalation_counts.py`**: exact escalation counts (not just
+rates) from the PCAP-path sweep, at 1%/5%/10%-benign-rate-anchored
+operating points, per STATUS's already-fitted config. Cross-checked
+against the earlier PCAP-vs-CSV comparison table and matches. Headline
+numbers (full breakdown, including precision and per-class miss counts,
+in the chat record and `results/pcap_escalation_counts.json`): at the 5%
+operating point, Friday escalates 291,490/677,526 flows, 81.9%
+precision, PortScan/DDoS recall ~98.7-99.8%, Bot recall 2.1% (62/2,901);
+combined with Monday's held-out half, 98.26% attack recall at 9.70% FPR.
+
+**`eval/threshold_sweep.py`**: swept `benign_plausibility`'s verdict cut
+over all 159 records (Bot n=0, excluded and stated as such, not silently
+dropped). **Result: `LOW=0.3` is not just "near-optimal" -- it ties the
+empirical Youden's-J maximum (+0.515) exactly**, because no record's
+`benign_plausibility` falls in (0.25, 0.30]; moving the cut to 0.325
+immediately costs 8.6 points of benign FPR for +2 points of DDoS
+detection. `HIGH=0.7` scores lower (J=+0.471) on the same metric, but
+it's answering a different operational question ("safe to fully clear"
+vs. "flag as anomalous") so a lower J there isn't evidence it's wrong,
+just not directly comparable via this metric. Also reconfirmed from this
+angle: even the best possible cut only gets DDoS to 36% detection at
+11.4% FPR -- a real class-overlap ceiling, not a threshold-tuning
+problem (consistent with Finding 2/3 in `PRESENTATION_SUMMARY.md`).
+
+**Full ablation re-run at n=159 (was n=20), all four detectors matched
+to the exact same 11.4% benign FPR (8/70) via `eval/ablation_v200.py`
+-- zero API calls, pure re-analysis, checked directly in response to
+the question "does nn_dist alone now match the agents' DDoS number?"**
+`ablation_v200.py`'s default target-FPR list didn't previously include
+0.114 itself (only coarser grid steps), so it was extended to always
+include the nearest achievable point to threshold_sweep.py's own
+Youden-optimal 8/70, guaranteeing every detector is compared at the
+identical real operating point DDoS-36% is quoted from, not a nearby
+approximation. Result, DDoS / PortScan (Bot still n=0):
+
+| detector | DDoS | PortScan |
+|---|---|---|
+| `nn_dist` alone | 6% | 100% |
+| `close_to_observed_count` alone | 14% | 67% |
+| combined (`nn_dist` + `close_to_observed_count`) | 14% | 97% |
+| full agent pipeline (`benign_plausibility`, LOW=0.3) | **36%** | 97% |
+
+**No, `nn_dist` alone does not match or beat 36% on DDoS at n=159 --
+the agent layer's justification survives, more clearly than the n=5
+number suggested.** `nn_dist` alone is actually worse relative to the
+pipeline at scale than the earlier framing implied: 6% vs. 36%, a 6x
+gap, at an identical 11.4% benign-FPR budget (not the 0%-FPR point the
+n=5 40%-vs-80% comparison used, so the two aren't the same measurement,
+but both point the same direction). Even `combined` (`nn_dist` +
+`close_to_observed_count`, the best purely-mechanical option available)
+tops out at 14% -- the agents still add +22 points on DDoS specifically.
+PortScan is the one place a mechanical detector (`nn_dist` alone, 100%)
+edges out the full pipeline (97%) at this exact operating point --
+consistent with PortScan's already-documented story throughout this
+project (a mechanical distance check was always sufficient there; the
+agents have never been the thing carrying PortScan).
+
+**Fault injection on a DDoS-heavy selection: built, blocked on quota,
+zero calls made.** Per instruction (PortScan's ~0.09 mean
+`benign_plausibility` is far enough from any verdict boundary that
+corruption is unlikely to ever flip it, so a PortScan-heavy sample
+wastes budget), selected 13 DDoS + 5 BENIGN + 2 PortScan from the
+current 200-record sample pool -- `results/
+fault_injection_selection_ddos_heavy.jsonl` -- reusing
+`eval/run_fault_injection.py`'s existing machinery by pointing its
+`--v4-results` flag (really just "a flow_id list", despite the name) at
+this new selection instead of the original v4 20. **The run hit the
+identical live daily-quota 429 immediately, at 0 (record, condition)
+pairs written, with this process's own tracked count at only 104/500**
+-- the same server-side-window mismatch as the main pipeline's earlier
+stall, confirmed a second time, not a one-off. New lead, not yet
+confirmed: the failed attempt landed at 06:12 UTC, ~48 minutes before
+07:00 UTC -- US Pacific midnight during PDT (UTC-7). Recorded as a live
+hypothesis in `agents/base.py`'s `DAILY_QUOTA_BY_MODEL` comment; a
+successful call shortly after 07:00 UTC on a day that was refused just
+before it would confirm the boundary. The selection and command are
+staged and idempotent (0 pairs written means a rerun repeats cleanly,
+nothing to skip) -- rerun
+`python -m eval.run_fault_injection --v4-results results/fault_injection_selection_ddos_heavy.jsonl --source-sample results/escalation_records_sample.jsonl --out results/fault_injection_ddos_heavy.jsonl`
+once quota actually allows it. Real cost when it runs: ~300 calls (20
+records x (5 clean + 10 fault-rerun) calls), ~25-30 min at the measured
+12 RPM cap.
+
+## Tight percentile x k sweep -- volume problem not solved by tuning alone
+
+`eval/percentile_k_sweep.py`: percentile in {99.5, 99.9, 99.95, 99.99,
+99.995, 99.999} x k_of_n's k in {2,3,4,5}, Monday-only fit, measured on
+Monday holdout + Friday PCAP (real Bot/PortScan/DDoS labels). Zero API
+calls, pure re-analysis of cached parquets. Full grid/plot in
+`results/percentile_k_sweep.csv` / `results/figures/percentile_k_sweep.png`.
+
+**Finding: reaching ~1% combined escalation while keeping attack recall
+high is not achievable in this grid -- it's a cliff, not a tradeoff
+curve.** Every cell at <=1% combined escalation has pooled attack recall
+<=0.4% (best: p99.5/k=5, 0.125% escalation, 0.4% recall). Raising k
+doesn't cut volume gracefully either: p99.5 k=2->4 barely moves
+escalation (28%->19%) while DDoS recall already collapses (97.5%->58.5%);
+k=4->5 then craters both escalation AND recall together (19%->0.1%,
+73%->0.4%). PortScan survives k increases far better than DDoS (fires 4
+correlated features together -- `flows_per_src` + `distinct_dst_ports_per_src`
++ `syn_ratio` + `syn_without_synack_count`, the classic scan signature)
+but even it dies by k=5.
+
+**The Monday-to-Friday benign-FPR gap gets relatively WORSE as the
+percentile tightens, not better**, even though the raw pp gap shrinks
+(both numbers head toward zero): 7.7x (p99.5) -> 47x -> 90x -> 490x ->
+1344x -> **infinite at p99.999** (Monday holdout hits exactly 0 false
+positives across 283,432 benign flows; Friday still leaks 1.75%
+through). You can't out-tighten a distribution shift.
+
+## Two follow-up experiments: single-day baseline vs. mechanism
+
+Per direct instruction, tested whether Monday-only fitting was itself
+the problem (re-fit on pooled Monday+Friday-benign data) and whether a
+combination-based signature table generalizes better than independent
+percentile thresholds. Both zero-API-call, pure re-analysis.
+`eval/generalization_experiments.py`; full grid in
+`results/generalization_exp1.csv`, `results/generalization_feature_dist.csv`,
+`results/generalization_exp2.json`.
+
+**Experiment 1 (pooled fit): the gap does NOT close -- confirms a real
+mechanism problem, not just a single-day baseline artifact.** Fit on
+Monday + half of Friday's own BENIGN flows (other half held out,
+zero-day property asserted exactly as `dataplane/fitting.py` already
+enforces), re-measured against the identical held-out populations used
+for the Monday-only baseline. At k=2 the gap ratio is mixed-to-worse
+with pooling: 13.4x->14.3x (p99.5), 88.7x->83.9x (p99.9, slightly
+better), 907.2x->1991.7x (p99.99, much worse), 2455.6x->inf (p99.995).
+Pooling does cut Friday's *absolute* FPR at several points (e.g. p99.99
+k=2: 6.40%->4.92%; p99.999 k=2: 3.04%->1.75%) but never closes the gap
+to Monday's near-zero level, and at the tightest, most decision-relevant
+percentiles it's actively worse in ratio terms -- fitting on Friday's
+*own* benign data still doesn't predict Friday's *other* held-out
+benign half well.
+
+**Root cause, directly diagnosed via feature distributions (Monday vs
+Friday benign, full populations, medians nearly identical -- this is a
+pure tail phenomenon, not a general shift):**
+
+| feature | mon p99 | fri p99 | mon p99.5 | fri p99.5 | mon max | fri max |
+|---|---|---|---|---|---|---|
+| `distinct_dst_ports_per_src` | 18.7 | **202.6** (10.9x) | 31.9 | **238.1** (7.5x) | 205 | 1,019 (5x) |
+| `flows_per_src` | 1,314 | 4,819 (3.7x) | 1,551 | 5,061 (3.3x) | 1,993 | **45,860** (23x) |
+| `syn_without_synack_count` | 3 | 2 | 4 | 4 | 14 | **247** (17.6x) |
+| `pkt_len_range` | 4,186 | 8,760 (2.1x) | 4,380 | 10,220 (2.3x) | 23,360 | 24,820 |
+| `bwd_pkt_len_mean` | 1,551 | 2,361 (1.5x) | 1,764 | 2,942 (1.7x) | 3,016 | 3,909 |
+
+`distinct_dst_ports_per_src` and `flows_per_src` shift most -- Friday
+has legitimate benign hosts touching 5-11x more distinct ports and
+opening up to 23x more flows than anything Monday ever samples, with
+`syn_without_synack_count`'s max 17.6x higher too. Medians match almost
+exactly across both days for all five features -- this is specifically
+a thin, legitimately-occurring heavy tail (bursty/broad-activity benign
+hosts) that a single day's worth of data can't reliably characterize at
+a percentile cut, not a baseline-selection artifact.
+
+**Experiment 2 (signature table): a real, class-specific win for DDoS,
+and a diagnosable total failure for PortScan.** Five load-bearing
+features binned into 6 quantile ranges (edges fixed from the pooled fit
+population so both K variants differ only in which signatures they've
+seen); escalate if a flow's 5-tuple bin-signature was never seen (below
+a frequency floor) in training. At floor=1, `K_pooled` on
+`combined_holdout`: **12.85% escalation, DDoS recall 98.5%** -- beats
+every single point on the percentile x k grid at comparable-or-lower
+volume (the closest percentile-grid escalation, ~16%, only gets DDoS to
+0.1-16%). Confirms the hypothesis: combinations catch DDoS that marginal
+per-feature thresholds miss. **But PortScan recall is 0.0% in every
+floor/variant combination tested (1, 5, 20 x monday_only, pooled) --
+strictly worse than percentiles, which get PortScan to 95-99%
+everywhere.** Diagnosis: PortScan's extreme `flows_per_src`/
+`pkt_len_range` values collapse into the same coarse top bin ("above
+the 5th quantile cut") that Friday's own heavy-tailed *benign* hosts
+already occupy in K -- per experiment 1's own finding, Friday benign
+legitimately reaches `flows_per_src` up to 45,860. The identical
+distribution-shift mechanism that breaks percentile thresholds also
+breaks signatures for PortScan specifically, just via coarse binning
+instead of a threshold miss. Unlike percentile pooling, growing K's
+training population barely moves Friday-side numbers at all (floor=5:
+`friday_eval` escalation 20.82%->20.77% monday_only->pooled, DDoS/PortScan
+identical) -- K's bottleneck is bin coarseness at the tail, not sample
+size.
+
+**Net verdict: the single-day baseline was NOT the (whole) problem --
+much of the redesign is still warranted.** But the signature-table
+result is a genuine, reusable finding: it's a strong DDoS-specific
+detector worth keeping/refining (e.g. finer top-end binning so PortScan
+stops colliding with heavy-tailed benign hosts), not a replacement for
+percentile thresholds outright.
+
+## Ratio features: fixes the tail-shift problem, breaks PortScan
+
+Per direct instruction, tested the hypothesis both experiments above
+point at: the load-bearing features are absolute counts (`flows_per_src`,
+`distinct_dst_ports_per_src`, `syn_without_synack_count`,
+`distinct_dst_ips_per_src`), heavy-tailed and unbounded, so a percentile
+fitted on one day's tail can't bound another day's. Added three
+normalised replacements to `dataplane/selector.py`'s
+`compute_src_features` -- `port_diversity_ratio =
+distinct_dst_ports_per_src/flows_per_src`, `unanswered_syn_ratio =
+syn_without_synack_count/flows_per_src`, `dst_concentration =
+distinct_dst_ips_per_src/flows_per_src` -- each bounded in [0,1] by
+construction (numerator is a sub-count of `flows_per_src`), registered as
+`FeatureKind.BOUNDED_RATIO` in `dataplane/fitting.py`.
+`FEATURE_SCHEMA_VERSION` bumped 4->5 (forces fresh PCAP extraction, ~10
+min/day); `eval/sweep.py`'s `SRC_FEATURES` updated so per-flow-only
+ablations still exclude all seven per-source columns. New script:
+`eval/ratio_feature_experiments.py`. Zero-API-call, PCAP-path only.
+
+**Part 1 confirms the hypothesis cleanly.** Friday/Monday ratio at
+p99.5, counts vs their normalised replacements:
+
+| feature | mon p99.5 | fri p99.5 | fri/mon | mon max | fri max |
+|---|---|---|---|---|---|
+| `flows_per_src` | 1,551 | 5,061 | **3.26x** | 1,993 | 45,860 |
+| `distinct_dst_ports_per_src` | 31.9 | 238.1 | **7.46x** | 205 | 1,019 |
+| `syn_without_synack_count` | 4 | 4 | 1.00x | 14 | **247** (17.6x) |
+| `port_diversity_ratio` | 1.024 | 1.026 | **1.00x** | 1.103 | 1.107 |
+| `unanswered_syn_ratio` | 0.035 | 0.043 | **1.24x** | 1.5 | 1.5 |
+| `dst_concentration` | 1.004 | 1.004 | **1.00x** | 1.05 | 1.057 |
+
+`port_diversity_ratio`/`dst_concentration` show essentially *zero*
+cross-day shift at p99.5 (their raw-count counterparts shift 7.5x/3.3x),
+and `unanswered_syn_ratio`'s max stays near 1.5 on both days vs.
+`syn_without_synack_count`'s max exploding 17.6x on Friday. The medians
+match almost exactly across both, same as the counts -- confirms this is
+the same thin-tail phenomenon, just no longer able to blow past a hard
+[0,1] bound the way an unbounded count can.
+
+**Part 2 (percentile x k sweep, ratios substituted for
+`flows_per_src`/`distinct_dst_ports_per_src`/`distinct_dst_ips_per_src`/
+`syn_without_synack_count`): the FPR gap shrinks substantially, but
+PortScan recall collapses.** At the same p99.5/k=2 operating point
+(`results/percentile_k_sweep_ratios.csv` vs `results/percentile_k_sweep.csv`):
+
+| | Monday FPR | Friday FPR | gap (pp) | gap (ratio) | PortScan recall | DDoS recall | Bot recall | pooled recall |
+|---|---|---|---|---|---|---|---|---|
+| counts (baseline) | 0.97% | 7.45% | 6.48pp | 7.66x | **99.72%** | 97.49% | 1.83% | 97.81% |
+| ratios | 0.98% | 4.53% | 3.55pp | 4.62x | **1.04%** | 91.43% | 2.03% | 31.22% |
+
+The FPR gap genuinely narrows (pp gap -45%, ratio 7.7x->4.6x, combined
+escalation volume 28.4%->10.2%) -- normalising *does* help transfer, as
+predicted. **But PortScan recall drops from 99.7% to 1.0%,** dragging
+pooled attack recall from 97.8% down to 31.2%. Diagnosis: PortScan's
+detectability was never "an elevated *rate*" -- a scan touches each port
+once, so `port_diversity_ratio` for a scanning source looks the same
+(~1.0) as any normal source that never reuses ports. The signal was
+always the raw *magnitude* (thousands of flows/ports in one window), and
+dividing by `flows_per_src` normalises exactly that away. This is a
+sharper version of Experiment 2's PortScan finding above (there,
+extreme-count collapse into a coarse top bin; here, the count's
+information content is deliberately discarded) -- same root cause,
+PortScan needs the absolute count, appearing a second, independent way.
+
+**Net verdict: not a straight swap.** Ratios fix generalisation for
+`port_diversity_ratio`/`dst_concentration` specifically and are worth
+keeping, but not as a *replacement* for the raw counts -- PortScan needs
+`flows_per_src`/`distinct_dst_ports_per_src` (or some other
+magnitude-sensitive form of them) present alongside the ratios, not
+instead of them. Untested next step: fit both forms together (ratios for
+generalisation, counts for magnitude-sensitive classes like PortScan) and
+see whether k_of_n's combination logic gets the best of both without
+reopening the tail-shift gap.
+
+## 5-feature selector: cross-day generalization test -- SUPERSEDED, see correction below
+
+**This section's "confirmed overfit" conclusion does not hold as stated --
+see "Cross-day follow-up: adapter mismatch confound" further down, which
+found a same-day, same-threshold, two-order-of-magnitude CSV-vs-PCAP
+crossing-rate gap on the exact per-source COUNT features this test
+depends on. Left in place, not deleted, because the raw numbers below are
+still accurate and the correction only holds if this section is visible
+for it to correct.**
+
+The reduced-feature line of work (`results/reduced_selector_report.md` ->
+`results/final_selector_report.md` -> `results/seven_feature_selector_report.md`)
+selected its final 5/7-feature set by looking only at which features fire
+often on **Friday** (PortScan/DDoS/Bot). `eval/five_feature_cross_day.py`
+tests that SAME, unchanged fitted config (Monday PCAP benign, chronological
+split, p99.5; COUNT=`flows_per_src`/`distinct_dst_ports_per_src`/
+`syn_without_synack_count`, RATIO=`syn_ratio`/`bwd_fwd_byte_ratio`, rule:
+>=1 COUNT AND >=1 RATIO) against Tuesday/Wednesday/Thursday (CSV path,
+cached `*__eval__adapter1__features4.parquet`, real CICIDS2017 labels
+never examined during feature selection) and Friday (PCAP), no API calls,
+no re-simulation. Full per-day tables in
+`results/five_feature_cross_day_report.md`.
+
+**Result: near-zero recall on every class outside PortScan/DDoS, at
+sample sizes too large to be noise:**
+
+| day | class | n | recall |
+|---|---|---|---|
+| Tue | FTP-Patator | 7,938 | 18.8% |
+| Tue | SSH-Patator | 5,897 | 0.0% |
+| Wed | DoS Hulk | 231,073 | 26.8% |
+| Wed | DoS GoldenEye | 10,293 | 11.2% |
+| Wed | DoS Slowhttptest | 5,499 | 11.0% |
+| Wed | DoS slowloris | 5,796 | 0.0% |
+| Wed | Heartbleed | 11 | 100.0% (n=11, unreliable) |
+| Thu | Web Attack: Brute Force | 1,507 | 0.0% |
+| Thu | Web Attack: XSS | 652 | 0.0% |
+| Thu | Web Attack: SQL Injection | 21 | 0.0% (unreliable) |
+| Thu | Infiltration | 36 | 0.0% (unreliable) |
+| Fri | Bot | 2,901 | 0.3% |
+| Fri | **PortScan** | 158,945 | **99.6%** |
+| Fri | **DDoS** | 81,075 | **78.2%** |
+
+Even `DoS Hulk` -- structurally the class closest to DDoS (a volumetric
+flood) -- only reaches 26.8%, which argues against "the selector generalizes
+to floods/scans broadly" and for "it's tuned to this scan's `syn_ratio`
+signature and this flood's `bwd_fwd_byte_ratio` signature specifically."
+Consistent with the prior finding (`results/seven_feature_selector_report.md`'s
+ratio-contribution breakdown) that `syn_ratio`/`bwd_fwd_byte_ratio` never
+co-fire and each carries exactly one Friday class end-to-end with zero
+redundancy -- this cross-day test is the same narrowness showing up as
+zero *transfer*, not just zero backup.
+
+**Caveat, stated not used to soften the result:** Tuesday-Thursday are
+CSV-adapter-derived (synthetic packet spacing) and the Monday-PCAP-fitted
+thresholds are applied to them unchanged -- a cross-adapter gap layered on
+the cross-day question. Doesn't explain the pattern away: `DoS Hulk`
+failing alongside DDoS partially succeeding, both volumetric floods, is
+hard to attribute to adapter mismatch alone.
+
+**Verdict, in the terms the question was asked: yes, say so.** The
+5-/7-/18-feature count-AND-ratio selector at p99.5 is a PortScan/DDoS
+detector, not a general anomaly detector, and STATUS/README claims about
+it should be scoped to those two classes rather than presented as a
+general zero-day result until it's re-derived against the other attack
+families (Patator, DoS-Hulk-style floods, web attacks, infiltration) --
+none of which contributed to any feature or threshold choice in this
+line of work.
+
+## Cross-day follow-up: adapter mismatch confound -- the overfit conclusion above does not hold as stated
+
+Two checks, requested specifically before trusting the section above:
+(1) whether the unreduced 18-feature config also fails on Tuesday-Thursday
+(isolating reduction from the count-AND-ratio approach itself), and (2)
+whether Tue-Thu's near-zero recall is actually the CSV adapter failing to
+produce the signal these features need, not a real generalization gap.
+`eval/cross_day_followups.py`, zero API calls, re-analysis of cached
+feature parquets. Full tables in `results/cross_day_followups_report.md`.
+
+**Check 1 result: the 18-feature config does NOT cleanly succeed on
+Tue-Thu either -- it fails in the opposite direction.** Recall looks
+high (FTP-Patator 99.8%, DoS Slowhttptest 99.5%, DoS slowloris 98.4%,
+Web XSS 93.6%, Infiltration 94.4%), but the BENIGN false-alarm rate on
+those same days is **62.2% (Tue) / 64.9% (Wed) / 63.0% (Thu)** -- vs.
+3.4% on Friday. That's not a working selector; it's escalating roughly
+two-thirds of ALL traffic, benign and attack alike. High recall bought
+by flagging almost everything isn't evidence of generalization. So
+neither original branch ("18 fails too, reduction innocent" / "18
+succeeds, revert reduction") is quite right: **both configs fail on
+Tue-Thu, in opposite directions** (5-feature: recall-collapse with a
+clean FPR; 18-feature: FPR-collapse with inflated-looking recall) --
+reduction changed *which* failure mode shows up (a narrower RATIO-side
+OR is incidentally more robust to whatever is driving the FPR blowup)
+but didn't cause the underlying problem, which check 2 identifies.
+
+**Check 2 result: confirmed, decisively -- this is adapter mismatch, not
+generalization, and it's large.** Same Monday, same fitted thresholds
+(from Monday PCAP), only the adapter differs:
+
+| feature | Monday CSV benign crossing rate | Monday PCAP benign crossing rate |
+|---|---|---|
+| `flows_per_src` | 67.08% | 0.60% |
+| `distinct_dst_ports_per_src` | 61.91% | 0.27% |
+| `syn_without_synack_count` | 60.39% | 0.11% |
+| `syn_ratio` | 3.85% | 0.56% |
+| `bwd_fwd_byte_ratio` | 1.62% | 0.54% |
+
+The three per-source COUNT features cross **100-600x more often on CSV
+than on PCAP, on the identical day's benign traffic.** This directly
+falsifies the specific mechanism hypothesized before running this check
+(that `syn_ratio`/`syn_without_synack_count` might structurally never
+fire on CSV data because the adapter reconstructs flags rather than
+observing them) -- `syn_without_synack_count` doesn't fail to fire, it
+fires 500x *too often*, the opposite direction. The real mechanism is
+almost certainly the CSV adapter's per-source accounting itself:
+`adapters/csv_flow_adapter.py`'s known lossy packet synthesis (evenly-
+spaced synthetic timing, no true concurrency -- see README's "Known
+Limitations") feeds a `SrcTable` whose per-source flow/port counts
+accumulate completely differently than they would from real per-packet
+arrival. The RATIO features are much closer between adapters (`syn_ratio`
+3.85% vs 0.56%, ~7x, not ~100x) -- the distortion is concentrated in the
+per-source COUNT features specifically, consistent with Tue/Wed's own
+BENIGN crossing rates (`flows_per_src` 63-69%, `distinct_dst_ports_per_src`
+64-69%) landing in the same wildly-inflated range as Monday CSV, while
+`syn_ratio`/`bwd_fwd_byte_ratio` stay in the low single digits on every
+CSV day, PCAP-comparable.
+
+(Side observation, not chased further: Thursday's `flows_per_src`/
+`distinct_dst_ports_per_src` crossing rates are anomalously low, 0.004%/
+0.16%, unlike Tuesday/Wednesday's 60%+ -- almost certainly because
+Thursday is cached as two SEPARATE CSV files, `thursday_morning_webattacks`
+and `thursday_afternoon_infiltration`, each simulated with its own fresh
+`SrcTable` per `eval/simulate.py`'s per-day-file caching, so per-source
+counts never accumulate across a full working day the way Monday's/
+Tuesday's/Wednesday's single-file simulations do. A cache-structure
+artifact, not a new finding about Thursday's traffic.)
+
+**Corrected verdict: the cross-day test as run cannot separate
+"feature-selection overfit to PortScan/DDoS" from "CSV/PCAP adapter
+mismatch," because the confound is real, large (two orders of magnitude
+on the count features), and demonstrated on the SAME day with the SAME
+thresholds -- not inferred. The "confirmed overfit" language in the
+section above should be read as unconfirmed pending a clean test:
+re-fit thresholds on Monday CSV (adapter1, matching Tue-Thu's own
+adapter) rather than reusing Monday-PCAP-fitted thresholds, then re-run
+the cross-day comparison. Not yet done. The one claim that still stands
+untouched by this confound is the original PortScan/DDoS PCAP-only
+result (`results/final_selector_report.md`, `results/
+seven_feature_selector_report.md`) -- those never crossed the adapter
+boundary.
+
+## Clean cross-day test, adapter confound removed -- DEFINITIVE: narrowness is real, not the adapter, not the reduction
+
+Both configs refit from scratch on Monday **CSV** (adapter1) benign,
+chronologically split, p99.5 -- same adapter as Tuesday-Thursday, so the
+confound identified in the section above can't be in play.
+`eval/csv_refit_cross_day.py`, zero API calls, re-analysis of cached
+feature parquets. Full per-day tables in
+`results/csv_refit_cross_day_report.md`. (18-feature config runs at 17
+features here -- the CSV cache is schema4, predating the 4->5 bump that
+added `port_diversity_ratio`/`unanswered_syn_ratio`/`dst_concentration`;
+stated in the report, not silently dropped.)
+
+**Result: both configs now have sane, low FPR everywhere -- and both get
+essentially zero recall on every non-Friday class.**
+
+| day | class | n | 5-feature recall | 18-feature (17-feat) recall |
+|---|---|---|---|---|
+| Tue | FTP-Patator | 7,938 | 0.0% | 0.0% |
+| Tue | SSH-Patator | 5,897 | 0.0% | 0.0% |
+| Wed | DoS Hulk | 231,073 | 0.0% | 0.4% |
+| Wed | DoS GoldenEye | 10,293 | 0.0% | 0.0% |
+| Wed | DoS Slowhttptest | 5,499 | 0.0% | 0.0% |
+| Wed | DoS slowloris | 5,796 | 0.0% | 0.0% |
+| Wed | Heartbleed | 11 | 0.0% | 100.0% (n=11, unreliable) |
+| Thu | Web Attack: Brute Force | 1,507 | 0.0% | 0.0% |
+| Thu | Web Attack: XSS | 652 | 0.0% | 0.0% |
+| Thu | Web Attack: SQL Injection | 21 | 0.0% | 0.0% |
+| Thu | Infiltration | 36 | 0.0% | 0.0% |
+
+Monday CSV holdout FPR: 5-feature 0.080%, 18-feature 0.262%. Tue/Wed/Thu
+FPR: 0.05-0.57% for both configs across the board -- **the earlier
+62-65% FPR "success" for the 18-feature config was confirmed to be
+entirely the adapter-mismatch artifact identified above, not a real
+property of count-AND-ratio at p99.5.** With that confound removed, the
+18-feature config doesn't secretly work either -- it drops from
+"escalates two-thirds of everything" straight to "detects almost
+nothing," with no usable middle ground exposed at this operating point.
+
+**Answers both original questions cleanly:**
+- *Does 18-feature still escalate ~60% of benign traffic once properly
+  fit?* No -- that was 100% the adapter confound. Properly fit, its FPR
+  is sane (0.26-0.57%).
+- *Does 5-feature get near-zero recall because it's too narrow?* Yes --
+  but so does the (nearly-)full 18-feature config, at the same operating
+  point, once fairly fit. **The narrowness isn't a reduction artifact --
+  count-AND-ratio at p99.5 genuinely does not carry signal for Patator,
+  DoS-Hulk-style floods, web attacks, or infiltration, at 5 features or
+  at 17.** Feature count was never the variable that mattered here.
+
+**This supersedes both sections above with a confound-free answer.** The
+selector (5-feature or 18-feature, count-AND-ratio, p99.5, Monday-fitted)
+is confirmed to be PortScan/DDoS-specific -- not because of reduction,
+not because of an adapter artifact, but as a genuine property of the
+approach against these other attack families. Any claim about this
+selector's zero-day/general-anomaly properties should be scoped to
+PortScan/DDoS explicitly. Untested next step, if this needs to be fixed
+rather than just scoped: different features/rule/operating point derived
+with Tue-Thu's own attack behavior in view, not just Friday's.
+
+## Two checks on the "narrowness is real" verdict -- refined, not reversed
+
+Before recording the section above as final: (1) is DoS Hulk's 0.0%
+(n=231,073) a feature firing-and-missing or a feature that structurally
+can't fire, and are CSV-fitted thresholds inflated relative to PCAP; (2)
+does recall turn on at any looser percentile (p98/p99/p99.5), or does it
+stay at zero regardless. `eval/csv_refit_diagnostics.py`, zero API calls.
+Full detail in `results/csv_refit_diagnostics_report.md`.
+
+**Check 1: CSV-fitted thresholds ARE dramatically inflated vs PCAP --
+22-184x higher** (`flows_per_src` 33,523 vs 1,505; `distinct_dst_ports_per_src`
+1,760.76 vs 38.80; `syn_without_synack_count` 737 vs 4; `bwd_fwd_byte_ratio`
+105.36 vs 33.06). For `syn_without_synack_count` specifically this is the
+direct cause of Hulk's miss: Hulk's own value (348) clears the PCAP-scale
+threshold (4) easily but sits below the CSV-inflated one (737). But
+`flows_per_src`/`distinct_dst_ports_per_src` would miss Hulk even at
+PCAP-scale thresholds -- Hulk's own values (58 flows/src, 12.29 ports/src)
+are genuinely far below even the PCAP threshold (1,505 / 38.8), so part
+of the miss is real narrowness, not just inflation.
+
+**Check 2: recall stays exactly 0.0% at every percentile tested (p98,
+p99, p99.5) -- confirmed, and the mechanism is now fully understood.**
+Drilling into which side of the AND-gate still blocks Hulk at p98 (the
+loosest point swept): the RATIO side loosens correctly (`bwd_fwd_byte_ratio`'s
+threshold drops to 31.57 at p98, just below Hulk's own median of 32.03 --
+most Hulk flows WOULD satisfy the ratio side there). **The COUNT side is
+what's frozen: `flows_per_src`'s threshold is flat at exactly 33,523
+across the entire p98-99.5 range.** Root cause, checked directly: Monday
+CSV fit-half's `flows_per_src` (264,959 rows, only 191 distinct values)
+has **37,692 flows (14.2%) tied at exactly 33,523, its own maximum** --
+so every percentile from p90 through p100 lands on that tied maximum and
+`>` can never cross it, the same structural failure as the bounded-ratio
+saturation bug fixed earlier in this project (`syn_ratio`/
+`no_response_flag`), now found in an *unbounded* count feature, on the
+CSV adapter specifically -- almost certainly `adapters/csv_flow_adapter.py`'s
+already-documented lack of true concurrency (README's "CSV-adapter-driven
+runs don't reproduce realistic flow concurrency") letting a small number
+of "busy" simulated sources dominate the per-source count distribution.
+Reaching below that 14.2% mass would need a percentile below ~p86 --
+outside anything tested or proposed.
+
+**Refined verdict: the "narrowness is real" conclusion survives in
+substance but was incomplete.** DoS Hulk's miss is a genuine mix of (a)
+real narrowness -- `flows_per_src`/`distinct_dst_ports_per_src` are the
+wrong shape of feature for Hulk's behavior (low flow-count, high
+byte-volume) regardless of threshold placement -- and (b) a real,
+previously-unknown fitting bug (`flows_per_src` percentile-saturation on
+the CSV adapter) that never got a chance to loosen within the tested
+range and should not be read as "no operating point could ever work."
+Whether `syn_without_synack_count` + `bwd_fwd_byte_ratio` alone (both
+free of the flat-threshold problem, both already loosening correctly by
+p98) could carry Hulk detection once `flows_per_src`'s saturation bug is
+fixed is untested -- flagged as the concrete next step, not assumed
+either way. Patator/web-attacks/infiltration weren't re-examined by this
+check (only Hulk was drilled into) -- their own 0.0% numbers should be
+treated with the same "not yet ruled out" caution until similarly
+checked, not silently carried over as confirmed.
+
+## Generic saturation fix, then a valid cross-day re-run -- FINAL, supersedes both sections above
+
+The "not yet ruled out" caution above was warranted: `flows_per_src` --
+the single highest-firing feature -- was structurally frozen on the CSV
+path (14.2% of Monday CSV's fit-half tied at its own maximum, saturated
+at every percentile from p90 through p100), and the whole cross-day test
+ran with it silently disabled. Fixed generically, not case-by-case, and
+re-run properly. Four-part task, `dataplane/fitting.py` +
+`dataplane/selector.py` + `eval/sweep.py` changed; 4 new regression tests
+(475 passing, up from 471). No API calls throughout.
+
+**Part 1 -- generic saturation detection (`dataplane/fitting.py`).**
+Every feature (not just the hand-curated BOUNDED_RATIO/BOOLEAN list) now
+goes through one saturation-aware fit: a threshold is unreachable if it
+lands exactly on the feature's own observed extreme, OR the mass tied AT
+that extreme exceeds the percentile's own false-positive budget (with a
+`n_distinct > 1` guard so a genuinely constant feature, or the single
+unique top value of a small sample, doesn't false-positive). On
+saturation: BOOLEAN features are always excluded (closed 2-value domain,
+a rarity fit can never be informative there); everything else gets a
+rarity fit (escalate on values covering under the percentile's own
+budget of training mass -- including any value never seen in training at
+all) when cardinality is low enough (`RARITY_MAX_DISTINCT_ABS`/`_RATIO`,
+calibrated against this project's own cases), otherwise excluded. Every
+fit now emits a full per-feature report (`action`, threshold value(s),
+`feature_max`/`min`, `tied_mass`, `n_distinct`, `rarity_coverage`) --
+this should surface automatically from now on, not require a
+investigation each time it's hit. `FeatureThreshold` gained
+`common_values` (a rarity fit, mutually exclusive with `high`/`low`);
+`Selector.evaluate_features` and `eval/sweep.py::compute_crossings` both
+handle it. This is a global fitting-code change -- it also applies to
+every PCAP fit in this project's prior reports
+(`results/final_selector_report.md`,
+`results/seven_feature_selector_report.md`, etc.), which were generated
+before this fix and are not guaranteed bit-identical if re-run today;
+not re-run as part of this task, flagged for whoever revisits them.
+
+**Part 2 -- clean cross-day re-run, saturation fixed, percentile swept
+(p98/p99/p99.5), both configs fit on Monday CSV.** Full tables in
+`results/saturation_fixed_cross_day_report.md`. Headline change from the
+invalid test: real, non-saturation-artifact detection now appears for
+multiple non-PortScan/DDoS classes AT p98, cliffing off by p99 (same
+"cliff not dial" percentile pattern found throughout this project):
+
+| class (n) | p98 5-feat / 18-feat | p99 5-feat / 18-feat | p99.5 5-feat / 18-feat |
+|---|---|---|---|
+| FTP-Patator (7,938) | 30.9% / **80.8%** | 30.9% / 30.9% | 0.5% / 0.5% |
+| SSH-Patator (5,897) | 0.2% / 35.2% | 0.2% / 0.2% | 0.2% / 0.2% |
+| DoS Hulk (231,073) | **40.1% / 41.8%** | 0.0% / 0.7% | 0.0% / 0.7% |
+| DoS GoldenEye (10,293) | 14.7% / 14.7% | 0.0% / 0.0% | 0.0% / 0.0% |
+| DoS Slowhttptest (5,499) | 5.4% / 11.9% | 5.4% / 9.1% | 0.1% / 3.8% |
+| DoS slowloris (5,796) | 22.7% / 23.9% | 22.7% / 22.7% | 17.9% / 17.9% |
+| Web Attacks (all 3) | 0.0% / 0.0% | 0.0% / 0.0% | 0.0% / 0.0% |
+
+Monday CSV holdout FPR at p98: 2.29% (5-feat) / 5.15% (18-feat) -- Tue/Wed/Thu
+FPRs land in the same 4-7% range, a real, usable operating point, not a
+saturated one. **This directly overturns the "narrowness is real"
+conclusion for Patator and the DoS-flood variants** -- they were never
+undetectable, they were measured with a broken feature.
+
+**Part 3 -- does `syn_without_synack_count` + `bwd_fwd_byte_ratio` alone
+carry Hulk? No -- and this corrects Part 2's own initial read, not just
+the pre-fix baseline.** Isolated 2-feature test:
+**0.0% Hulk recall at every percentile (p98/p99/p99.5)** --
+`syn_without_synack_count`'s Monday-CSV-fitted threshold (557) sits
+above Hulk's own uniform value (348), unlike the PCAP-scale comparison
+that motivated testing this pair (PCAP threshold was only 4 -- CSV/PCAP
+threshold inflation, already documented, applies here too). **The real
+mechanism carrying Hulk's 40% recall in the 5-/18-feature configs is
+`flows_per_src`'s newly-fixed rarity fit** -- crossing rate 90.6% on ALL
+Wednesday flows (Hulk's uniform value of 58 isn't in Monday's common
+set), paired with `bwd_fwd_byte_ratio`. The fix didn't turn
+`flows_per_src` into a clean magnitude-based flood detector; it turned
+it into a broad rarity/novelty detector that happens to catch Hulk
+(and fires on 90% of Wednesday in general) while the ratio side does the
+real discriminating. Full detail: `results/two_feature_hulk_report.md`.
+
+**Part 4 -- failure attribution, three distinct findings, not collapsed
+into one.** Full detail: `results/failure_attribution_report.md`.
+
+- **Wrong shape (genuine limit): Web Attack Brute Force/XSS/SQL
+  Injection, 0.0% at every config and every percentile.** Exact values:
+  `flows_per_src`=5 (uniform, actually NOT in the rarity common set --
+  the COUNT side fires), `distinct_dst_ports_per_src`=1.002 (uniform,
+  threshold 820.76), `syn_without_synack_count`=0 (uniform, threshold
+  557 -- a clean handshake, not a scan), `syn_ratio`=0 (IS in the common
+  set -- ordinary), `bwd_fwd_byte_ratio` undefined for 90-96% of flows
+  and far under threshold (31.57) where defined. The RATIO side is what
+  blocks it, for a structural reason: these are application-layer
+  attacks (malicious HTTP payload) riding on completely ordinary-looking
+  single-request flows -- no flow-statistics feature observes payload
+  content, so no percentile or combination within this family fixes it.
+- **Below threshold (tuning, not a hard limit): DoS Hulk/GoldenEye/
+  Slowhttptest/slowloris.** Real signal at p98, suppressed by p99+ as
+  `bwd_fwd_byte_ratio`'s threshold rises past the attacks' own values
+  (31.57->63.68->105.36 vs. Hulk's median 32.03/p99 39.57) -- already
+  diagnosed in the prior section's follow-up.
+- **Inconclusive (n too small): Infiltration (36), Heartbleed (11).**
+  Not attributed either way.
+- **Config-dependent, not shape/threshold: SSH-Patator** (0.2% at
+  5-feature, 35.2% at 18-feature -- needs the fuller feature set).
+- **Out of scope: Bot** (no CSV-path data; PCAP-path finding, a genuine
+  per-flow-too-short limit, already independently established and
+  unaffected by this fix).
+
+**Realistic-outcome check against the task's own prediction: partially
+right, with a real correction.** PortScan/DDoS (PCAP, unaffected) and now
+Patator/Hulk/GoldenEye (CSV, p98) do get detected, as predicted -- but
+NOT via "flood-shaped features" as hypothesized; Hulk specifically is
+carried by the fixed rarity mechanism, not magnitude. Web attacks and
+Bot fail for genuine, now precisely diagnosed reasons, as predicted.
+Slow DoS (Slowhttptest/slowloris) is NOT a clean failure -- it's
+partially detected and threshold-sensitive, more nuanced than "failing
+by design." No number was tuned toward a target; every table above is
+what the measurements produced.

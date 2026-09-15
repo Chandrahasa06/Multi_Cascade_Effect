@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional
 
 from dataplane.flow_state import UNSET, FlowState
 from dataplane.src_table import SrcTable
@@ -23,7 +23,7 @@ from dataplane.src_table import SrcTable
 #: bump whenever compute_tier1_features/compute_src_features change what
 #: they return (new/removed/redefined features) — cached extractions key
 #: on this so a code change invalidates the cache. See eval/simulate.py.
-FEATURE_SCHEMA_VERSION = "4"
+FEATURE_SCHEMA_VERSION = "5"
 
 #: Timing-derived Tier-1 features whose confidence depends on how
 #: precisely the flow's timestamps are known. A flow that passed through
@@ -203,18 +203,31 @@ def _iat_regularity(flow: FlowState) -> Optional[float]:
 def compute_src_features(
     src_table: SrcTable, src_ip: str, now_us: int
 ) -> Dict[str, FeatureObservation]:
-    """Per-source sliding-window features, computed from SrcTable."""
+    """Per-source sliding-window features, computed from SrcTable.
+
+    `port_diversity_ratio`/`unanswered_syn_ratio`/`dst_concentration`
+    normalise the three count-based features above by `flows_per_src`.
+    Each numerator is a sub-count of a source's flows (distinct ports/ips
+    touched, or SYNs sent without a response, can't exceed the flow
+    count), so the ratios are bounded in [0, 1] by construction — unlike
+    the raw counts, which grow with a source's traffic volume and so
+    shift heavily between days with different benign traffic levels (see
+    the Monday-vs-Friday tail-shift finding in STATUS.md).
+    """
+    flows = float(src_table.flows_per_src(src_ip, now_us))
+    distinct_ports = src_table.distinct_dst_ports_per_src(src_ip, now_us)
+    distinct_ips = src_table.distinct_dst_ips_per_src(src_ip, now_us)
+    syn_no_ack = float(src_table.syn_without_synack_count(src_ip, now_us))
     return {
-        "flows_per_src": FeatureObservation(float(src_table.flows_per_src(src_ip, now_us))),
-        "distinct_dst_ports_per_src": FeatureObservation(
-            src_table.distinct_dst_ports_per_src(src_ip, now_us)
+        "flows_per_src": FeatureObservation(flows),
+        "distinct_dst_ports_per_src": FeatureObservation(distinct_ports),
+        "distinct_dst_ips_per_src": FeatureObservation(distinct_ips),
+        "syn_without_synack_count": FeatureObservation(syn_no_ack),
+        "port_diversity_ratio": FeatureObservation(
+            distinct_ports / flows if flows > 0 else None
         ),
-        "distinct_dst_ips_per_src": FeatureObservation(
-            src_table.distinct_dst_ips_per_src(src_ip, now_us)
-        ),
-        "syn_without_synack_count": FeatureObservation(
-            float(src_table.syn_without_synack_count(src_ip, now_us))
-        ),
+        "unanswered_syn_ratio": FeatureObservation(syn_no_ack / flows if flows > 0 else None),
+        "dst_concentration": FeatureObservation(distinct_ips / flows if flows > 0 else None),
     }
 
 
@@ -232,17 +245,36 @@ class EscalationRule(str, Enum):
 class FeatureThreshold:
     """A fitted, benign-only threshold for one feature. Either side may
     be absent: a feature that's only ever anomalous when high sets `low`
-    to None, and vice versa."""
+    to None, and vice versa.
+
+    `common_values`, when set, replaces high/low entirely with a rarity
+    fit (see dataplane/fitting.py's saturation handling): escalate if the
+    observed value is not among the values that covered at least the
+    percentile's own false-positive budget of benign fit-half mass. Used
+    for features where ordinary percentile fitting saturates (lands on
+    the feature's own extreme, unreachable by `>`/`<`) but the feature
+    has few enough distinct states that value membership is meaningful —
+    high/low are always None together with common_values; a threshold is
+    either a magnitude cut or a rarity set, never both."""
 
     high: Optional[float] = None
     low: Optional[float] = None
+    common_values: Optional[FrozenSet[float]] = None
 
     def to_dict(self) -> dict:
-        return {"high": self.high, "low": self.low}
+        d = {"high": self.high, "low": self.low}
+        if self.common_values is not None:
+            d["common_values"] = sorted(self.common_values)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "FeatureThreshold":
-        return cls(high=data.get("high"), low=data.get("low"))
+        common = data.get("common_values")
+        return cls(
+            high=data.get("high"),
+            low=data.get("low"),
+            common_values=frozenset(common) if common is not None else None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +381,10 @@ class Selector:
             threshold = self.config.thresholds.get(name)
             if threshold is None:
                 continue
+            if threshold.common_values is not None:
+                if observation.value not in threshold.common_values:
+                    trigger_reasons.append(self._make_rarity_reason(name, observation))
+                continue
             if threshold.high is not None and observation.value > threshold.high:
                 trigger_reasons.append(
                     self._make_reason(name, observation, threshold.high, "high")
@@ -381,5 +417,21 @@ class Selector:
             threshold=threshold,
             direction=direction,
             ratio=ratio,
+            low_confidence=observation.low_confidence,
+        )
+
+    @staticmethod
+    def _make_rarity_reason(feature: str, observation: FeatureObservation) -> TriggerReason:
+        """A rarity-fit crossing has no magnitude threshold to report a
+        ratio against — `threshold`/`ratio` are nominal (0.0/1.0) rather
+        than meaningful multiples; `direction="rare"` distinguishes this
+        from an ordinary high/low crossing for any downstream reader
+        (e.g. the agent pipeline's evidence prompts)."""
+        return TriggerReason(
+            feature=feature,
+            observed_value=observation.value,
+            threshold=0.0,
+            direction="rare",
+            ratio=1.0,
             low_confidence=observation.low_confidence,
         )

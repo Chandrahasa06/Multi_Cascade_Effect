@@ -158,20 +158,45 @@ def add_combined_score(rows: List[dict]) -> List[dict]:
     return rows
 
 
-def at_matched_benign_fpr(sweep: List[dict], targets: Sequence[float], classes: Sequence[str]) -> List[dict]:
+def at_matched_benign_fpr(
+    sweep: List[dict], targets: Sequence[float], classes: Sequence[str], direction: str = "high"
+) -> List[dict]:
     """For each target BENIGN FPR, the *most sensitive* sweep row whose
-    BENIGN rate still satisfies the target -- i.e. the smallest
-    threshold (sweep is ascending) among those with BENIGN<=target,
-    since BENIGN's rate is non-increasing as threshold rises, so that's
-    the highest-recall point available within the false-positive
-    budget (mirrors STATUS.md's existing 'anchored on
-    benign_escalation_rate' convention: best recall at or under a
-    target cost, not the most conservative point that happens to
-    qualify)."""
+    BENIGN rate still satisfies the target -- the highest-recall point
+    available within the false-positive budget (mirrors STATUS.md's
+    existing 'anchored on benign_escalation_rate' convention).
+
+    ``direction`` MUST match how the sweep's escalation rule moves with
+    its own ascending threshold list, or this silently picks the wrong
+    end and reports 0% recall everywhere -- a real bug caught while
+    building this exact figure (see PRESENTATION_SUMMARY.md):
+
+    - "high" (sweep_high_side: nn_dist, combined -- escalate if
+      value > threshold): BENIGN's rate is NON-INCREASING as threshold
+      rises (a higher cutoff flags fewer records), so the most sensitive
+      point satisfying the budget is the SMALLEST qualifying threshold
+      -> candidates[0].
+    - "low" (sweep_low_side: close_to_observed_count -- escalate if
+      value <= threshold -- and sweep_bp: full pipeline / baseline --
+      escalate if bp < threshold): BENIGN's rate is NON-DECREASING as
+      threshold rises (a higher cutoff flags MORE records), so the most
+      sensitive point satisfying the budget is the LARGEST qualifying
+      threshold -> candidates[-1]. Using candidates[0] here picks the
+      smallest threshold in the whole sweep, which is exactly the
+      dataset's own minimum observed value -- at that point NOTHING is
+      strictly less than it, so both BENIGN and every attack class read
+      0% simultaneously, regardless of what recall was actually
+      achievable at a real 0%-FPR operating point.
+    """
+    if direction not in ("high", "low"):
+        raise ValueError(f"direction must be 'high' or 'low', got {direction!r}")
     out = []
     for target in targets:
         candidates = [row for row in sweep if row.get("BENIGN") is not None and row["BENIGN"] <= target + 1e-9]
-        chosen = candidates[0] if candidates else (sweep[0] if sweep else {"threshold": None})
+        if candidates:
+            chosen = candidates[0] if direction == "high" else candidates[-1]
+        else:
+            chosen = sweep[0] if sweep else {"threshold": None}
         out.append({"target_benign_fpr": target, **{k: v for k, v in chosen.items() if k != "threshold"}})
     return out
 
@@ -282,24 +307,32 @@ def main(argv=None) -> int:
     rows = add_combined_score(rows)
 
     detectors = [
-        ("nn_dist alone", sweep_high_side(rows, "nn_dist", classes)),
-        ("close_to_observed_count alone", sweep_low_side(rows, "max_close_to_observed_count", classes)),
-        ("combined (nn_dist + close_to_observed_count)", sweep_high_side(rows, "combined_score", classes)),
-        ("full agent pipeline (benign_plausibility)", sweep_bp(rows, "benign_plausibility", classes)),
+        ("nn_dist alone", sweep_high_side(rows, "nn_dist", classes), "high"),
+        ("close_to_observed_count alone", sweep_low_side(rows, "max_close_to_observed_count", classes), "low"),
+        ("combined (nn_dist + close_to_observed_count)", sweep_high_side(rows, "combined_score", classes), "high"),
+        ("full agent pipeline (benign_plausibility)", sweep_bp(rows, "benign_plausibility", classes), "low"),
     ]
     if n_baseline:
-        detectors.append(("single-LLM baseline (benign_plausibility)", sweep_bp(rows, "baseline_benign_plausibility", classes)))
+        detectors.append((
+            "single-LLM baseline (benign_plausibility)",
+            sweep_bp(rows, "baseline_benign_plausibility", classes), "low",
+        ))
 
     n_benign = sum(1 for r in rows if r["label"] == "BENIGN")
     step = (1.0 / n_benign) if n_benign else 0.05
-    targets = sorted({0.0, round(step, 4), round(2 * step, 4), 0.05, 0.10, 0.20})
+    # 0.114 is threshold_sweep.py's own Youden's-J-optimal operating point
+    # (T=0.275, benign_fpr=8/70=11.43%) -- included explicitly so every
+    # detector here gets compared at the exact same real operating point
+    # that number is quoted from, not just the nearest coarser grid step.
+    matched_target = round(round(0.114 * n_benign) / n_benign, 6) if n_benign else 0.114
+    targets = sorted({0.0, round(step, 4), round(2 * step, 4), 0.05, 0.10, matched_target, 0.20})
 
     print("=" * 90)
     print(f"Per-class recall at matched benign FPR (n_benign={n_benign}, so the finest achievable step is {step:.2%})")
     print("=" * 90)
-    for name, sweep in detectors:
+    for name, sweep, direction in detectors:
         print(f"\n{name}:")
-        print(render_matched_table(at_matched_benign_fpr(sweep, targets, classes), classes))
+        print(render_matched_table(at_matched_benign_fpr(sweep, targets, classes, direction), classes))
         if args.full_sweeps:
             print("\nfull sweep:")
             print(render_sweep_table(sweep, classes))
@@ -308,7 +341,7 @@ def main(argv=None) -> int:
     print("=" * 90)
     print("Disagreement: distance-implied anomaly vs agents' benign_plausibility")
     print("=" * 90)
-    nn_sweep = [d for n, d in detectors if n == "nn_dist alone"][0]
+    nn_sweep = [d for n, d, _dir in detectors if n == "nn_dist alone"][0]
     nn_t = zero_fpr_threshold(nn_sweep)
     if nn_t is None:
         print("no 0%-benign-FPR threshold found for nn_dist in this data yet.")

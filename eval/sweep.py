@@ -38,6 +38,9 @@ SRC_FEATURES = (
     "distinct_dst_ports_per_src",
     "distinct_dst_ips_per_src",
     "syn_without_synack_count",
+    "port_diversity_ratio",
+    "unanswered_syn_ratio",
+    "dst_concentration",
 )
 
 
@@ -69,13 +72,20 @@ def all_feature_names(df: pd.DataFrame) -> List[str]:
 def compute_crossings(df: pd.DataFrame, thresholds: Dict[str, FeatureThreshold]) -> pd.DataFrame:
     """One boolean column per thresholded feature: did this flow cross it?
     NaN (undefined) never crosses — matches Selector.evaluate()'s
-    `if observation.value is None: continue`."""
+    `if observation.value is None: continue`. A rarity-fit threshold
+    (`common_values` set, see dataplane/fitting.py's saturation
+    handling) crosses when the value isn't among the fitted common
+    values — mutually exclusive with high/low, never combined."""
     crossings = {}
     for name, threshold in thresholds.items():
         if name not in df.columns:
             continue
         values = df[name]
         crossed = pd.Series(False, index=df.index)
+        if threshold.common_values is not None:
+            crossed = values.notna() & (~values.isin(threshold.common_values))
+            crossings[name] = crossed.fillna(False)
+            continue
         if threshold.high is not None:
             crossed = crossed | (values > threshold.high)
         if threshold.low is not None:

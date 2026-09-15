@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 results/
 .env
+STATUS.md
+cicids-2017_p0.pkl
