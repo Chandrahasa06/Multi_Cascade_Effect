@@ -1,0 +1,391 @@
+|--- Packet Length Mean <= 698.76
+|   |--- Fwd Packet Length Max <= 26.50
+|   |   |--- act_data_pkt_fwd <= 2.50
+|   |   |   |--- Init_Win_bytes_forward <= 1023.50
+|   |   |   |   |--- Flow IAT Mean <= 5088373.50
+|   |   |   |   |   |--- Fwd Packet Length Max <= 12.50
+|   |   |   |   |   |   |--- Subflow Fwd Packets <= 3.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 0.50
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Subflow Fwd Packets >  3.50
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 14295.92
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  14295.92
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Fwd Packet Length Max >  12.50
+|   |   |   |   |   |   |--- Packet Length Mean <= 9.47
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 1.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  1.50
+|   |   |   |   |   |   |   |   |--- class: FTP-Patator
+|   |   |   |   |   |   |--- Packet Length Mean >  9.47
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= -0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  -0.50
+|   |   |   |   |   |   |   |   |--- class: SSH-Patator
+|   |   |   |   |--- Flow IAT Mean >  5088373.50
+|   |   |   |   |   |--- Init_Win_bytes_forward <= 280.50
+|   |   |   |   |   |   |--- Flow IAT Mean <= 26887990.00
+|   |   |   |   |   |   |   |--- Bwd Packets/s <= 0.05
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Bwd Packets/s >  0.05
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |--- Flow IAT Mean >  26887990.00
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max <= 7.00
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max >  7.00
+|   |   |   |   |   |   |   |   |--- class: DoS slowloris
+|   |   |   |   |   |--- Init_Win_bytes_forward >  280.50
+|   |   |   |   |   |   |--- min_seg_size_forward <= 26.00
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 493.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  493.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- min_seg_size_forward >  26.00
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 22650000.00
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  22650000.00
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |--- Init_Win_bytes_forward >  1023.50
+|   |   |   |   |--- Subflow Fwd Packets <= 1.50
+|   |   |   |   |   |--- Init_Win_bytes_backward <= 2.00
+|   |   |   |   |   |   |--- Bwd Packets/s <= 1125.61
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Bwd Packets/s >  1125.61
+|   |   |   |   |   |   |   |--- Total Backward Packets <= 1.50
+|   |   |   |   |   |   |   |   |--- class: PortScan
+|   |   |   |   |   |   |   |--- Total Backward Packets >  1.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Init_Win_bytes_backward >  2.00
+|   |   |   |   |   |   |--- Init_Win_bytes_forward <= 1496.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 1443.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  1443.50
+|   |   |   |   |   |   |   |   |--- class: Web Attack
+|   |   |   |   |   |   |--- Init_Win_bytes_forward >  1496.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= 237.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  237.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Subflow Fwd Packets >  1.50
+|   |   |   |   |   |--- min_seg_size_forward <= 36.00
+|   |   |   |   |   |   |--- min_seg_size_forward <= 26.00
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= 29080.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  29080.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- min_seg_size_forward >  26.00
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= 28640.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  28640.00
+|   |   |   |   |   |   |   |   |--- class: Web Attack
+|   |   |   |   |   |--- min_seg_size_forward >  36.00
+|   |   |   |   |   |   |--- Subflow Fwd Packets <= 6.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= -0.50
+|   |   |   |   |   |   |   |   |--- class: DoS slowloris
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  -0.50
+|   |   |   |   |   |   |   |   |--- class: PortScan
+|   |   |   |   |   |   |--- Subflow Fwd Packets >  6.50
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 10506713.00
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  10506713.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |--- act_data_pkt_fwd >  2.50
+|   |   |   |--- Bwd Packets/s <= 0.10
+|   |   |   |   |--- Init_Win_bytes_forward <= 255.50
+|   |   |   |   |   |--- Packet Length Mean <= 5.14
+|   |   |   |   |   |   |--- Init_Win_bytes_forward <= 31.00
+|   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |--- Init_Win_bytes_forward >  31.00
+|   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |--- Packet Length Mean >  5.14
+|   |   |   |   |   |   |--- act_data_pkt_fwd <= 4.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 63.00
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  63.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- act_data_pkt_fwd >  4.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= -0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  -0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Init_Win_bytes_forward >  255.50
+|   |   |   |   |   |--- Init_Win_bytes_forward <= 256.50
+|   |   |   |   |   |   |--- act_data_pkt_fwd <= 8.50
+|   |   |   |   |   |   |   |--- act_data_pkt_fwd <= 5.50
+|   |   |   |   |   |   |   |   |--- class: DDoS
+|   |   |   |   |   |   |   |--- act_data_pkt_fwd >  5.50
+|   |   |   |   |   |   |   |   |--- class: DDoS
+|   |   |   |   |   |   |--- act_data_pkt_fwd >  8.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Init_Win_bytes_forward >  256.50
+|   |   |   |   |   |   |--- Init_Win_bytes_forward <= 305.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Init_Win_bytes_forward >  305.50
+|   |   |   |   |   |   |   |--- Total Backward Packets <= 1.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Total Backward Packets >  1.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |--- Bwd Packets/s >  0.10
+|   |   |   |   |--- Total Backward Packets <= 14.50
+|   |   |   |   |   |--- Flow IAT Mean <= 8022.00
+|   |   |   |   |   |   |--- Init_Win_bytes_backward <= 232.00
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 56.64
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  56.64
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Init_Win_bytes_backward >  232.00
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward <= 240.00
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Init_Win_bytes_backward >  240.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Flow IAT Mean >  8022.00
+|   |   |   |   |   |   |--- Packet Length Mean <= 156.33
+|   |   |   |   |   |   |   |--- min_seg_size_forward <= 31.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- min_seg_size_forward >  31.50
+|   |   |   |   |   |   |   |   |--- class: FTP-Patator
+|   |   |   |   |   |   |--- Packet Length Mean >  156.33
+|   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |--- Total Backward Packets >  14.50
+|   |   |   |   |   |--- Packet Length Mean <= 12.10
+|   |   |   |   |   |   |--- class: FTP-Patator
+|   |   |   |   |   |--- Packet Length Mean >  12.10
+|   |   |   |   |   |   |--- class: FTP-Patator
+|   |--- Fwd Packet Length Max >  26.50
+|   |   |--- Total Backward Packets <= 30.50
+|   |   |   |--- Flow IAT Mean <= 5184098.00
+|   |   |   |   |--- Init_Win_bytes_backward <= 226.50
+|   |   |   |   |   |--- Flow IAT Mean <= 3203783.62
+|   |   |   |   |   |   |--- Packet Length Mean <= 348.66
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max <= 94.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max >  94.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Packet Length Mean >  348.66
+|   |   |   |   |   |   |   |--- Packet Length Mean <= 348.67
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Packet Length Mean >  348.67
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Flow IAT Mean >  3203783.62
+|   |   |   |   |   |   |--- Bwd Packets/s <= 0.02
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 3281823.12
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  3281823.12
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Bwd Packets/s >  0.02
+|   |   |   |   |   |   |   |--- Packet Length Mean <= 31.87
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Packet Length Mean >  31.87
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Init_Win_bytes_backward >  226.50
+|   |   |   |   |   |--- Init_Win_bytes_backward <= 238.50
+|   |   |   |   |   |   |--- Packet Length Mean <= 340.04
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max <= 42.50
+|   |   |   |   |   |   |   |   |--- class: FTP-Patator
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max >  42.50
+|   |   |   |   |   |   |   |   |--- class: Bot
+|   |   |   |   |   |   |--- Packet Length Mean >  340.04
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 18576.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  18576.00
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |   |   |--- Init_Win_bytes_backward >  238.50
+|   |   |   |   |   |   |--- Bwd Packets/s <= 0.08
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max <= 249.00
+|   |   |   |   |   |   |   |   |--- class: DoS slowloris
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max >  249.00
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |--- Bwd Packets/s >  0.08
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 255.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  255.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |--- Flow IAT Mean >  5184098.00
+|   |   |   |   |--- Fwd Packet Length Max <= 186.50
+|   |   |   |   |   |--- Packet Length Mean <= 19.75
+|   |   |   |   |   |   |--- Packet Length Mean <= 16.73
+|   |   |   |   |   |   |   |--- Total Backward Packets <= 0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Total Backward Packets >  0.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Packet Length Mean >  16.73
+|   |   |   |   |   |   |   |--- class: Infiltration
+|   |   |   |   |   |--- Packet Length Mean >  19.75
+|   |   |   |   |   |   |--- Packet Length Mean <= 20.85
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Packet Length Mean >  20.85
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Fwd Packet Length Max >  186.50
+|   |   |   |   |   |--- Fwd Packet Length Max <= 239.50
+|   |   |   |   |   |   |--- Fwd Packet Length Max <= 230.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 239.50
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  239.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Fwd Packet Length Max >  230.50
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward <= 22816.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Init_Win_bytes_forward >  22816.50
+|   |   |   |   |   |   |   |   |--- class: DoS slowloris
+|   |   |   |   |   |--- Fwd Packet Length Max >  239.50
+|   |   |   |   |   |   |--- Init_Win_bytes_forward <= 22880.00
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 43650000.00
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  43650000.00
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |   |   |   |--- Init_Win_bytes_forward >  22880.00
+|   |   |   |   |   |   |   |--- Bwd Packets/s <= 0.03
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Bwd Packets/s >  0.03
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |--- Total Backward Packets >  30.50
+|   |   |   |--- Packet Length Mean <= 95.08
+|   |   |   |   |--- Flow IAT Mean <= 299090.97
+|   |   |   |   |   |--- Bwd Packets/s <= 3.41
+|   |   |   |   |   |   |--- Total Backward Packets <= 35.50
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 196808.02
+|   |   |   |   |   |   |   |   |--- class: SSH-Patator
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  196808.02
+|   |   |   |   |   |   |   |   |--- class: SSH-Patator
+|   |   |   |   |   |   |--- Total Backward Packets >  35.50
+|   |   |   |   |   |   |   |--- class: SSH-Patator
+|   |   |   |   |   |--- Bwd Packets/s >  3.41
+|   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Flow IAT Mean >  299090.97
+|   |   |   |   |   |--- class: BENIGN
+|   |   |   |--- Packet Length Mean >  95.08
+|   |   |   |   |--- Subflow Fwd Packets <= 202.50
+|   |   |   |   |   |--- Init_Win_bytes_forward <= 255.50
+|   |   |   |   |   |   |--- Init_Win_bytes_forward <= 254.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Init_Win_bytes_forward >  254.50
+|   |   |   |   |   |   |   |--- Packet Length Mean <= 199.98
+|   |   |   |   |   |   |   |   |--- class: Infiltration
+|   |   |   |   |   |   |   |--- Packet Length Mean >  199.98
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Init_Win_bytes_forward >  255.50
+|   |   |   |   |   |   |--- Subflow Fwd Packets <= 32.50
+|   |   |   |   |   |   |   |--- Packet Length Mean <= 184.59
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Packet Length Mean >  184.59
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Subflow Fwd Packets >  32.50
+|   |   |   |   |   |   |   |--- Bwd Packets/s <= 0.26
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Bwd Packets/s >  0.26
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Subflow Fwd Packets >  202.50
+|   |   |   |   |   |--- Subflow Fwd Packets <= 204.00
+|   |   |   |   |   |   |--- class: Web Attack
+|   |   |   |   |   |--- Subflow Fwd Packets >  204.00
+|   |   |   |   |   |   |--- act_data_pkt_fwd <= 505.00
+|   |   |   |   |   |   |   |--- act_data_pkt_fwd <= 10.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- act_data_pkt_fwd >  10.00
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- act_data_pkt_fwd >  505.00
+|   |   |   |   |   |   |   |--- class: Infiltration
+|--- Packet Length Mean >  698.76
+|   |--- Fwd Packet Length Max <= 29.50
+|   |   |--- Fwd Packet Length Max <= 19.00
+|   |   |   |--- Init_Win_bytes_forward <= 29080.00
+|   |   |   |   |--- class: BENIGN
+|   |   |   |--- Init_Win_bytes_forward >  29080.00
+|   |   |   |   |--- Flow IAT Mean <= 80599.27
+|   |   |   |   |   |--- class: PortScan
+|   |   |   |   |--- Flow IAT Mean >  80599.27
+|   |   |   |   |   |--- class: PortScan
+|   |   |--- Fwd Packet Length Max >  19.00
+|   |   |   |--- class: DDoS
+|   |--- Fwd Packet Length Max >  29.50
+|   |   |--- Bwd Packets/s <= 0.11
+|   |   |   |--- Fwd Packet Length Max <= 552.00
+|   |   |   |   |--- Init_Win_bytes_forward <= 330.50
+|   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |--- Init_Win_bytes_forward >  330.50
+|   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |--- Fwd Packet Length Max >  552.00
+|   |   |   |   |--- Fwd Packet Length Max <= 2006.00
+|   |   |   |   |   |--- Fwd Packet Length Max <= 1976.00
+|   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Fwd Packet Length Max >  1976.00
+|   |   |   |   |   |   |--- Flow IAT Mean <= 4.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Flow IAT Mean >  4.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- Fwd Packet Length Max >  2006.00
+|   |   |   |   |   |--- class: BENIGN
+|   |   |--- Bwd Packets/s >  0.11
+|   |   |   |--- Subflow Fwd Packets <= 5.50
+|   |   |   |   |--- Fwd Packet Length Max <= 435.50
+|   |   |   |   |   |--- Init_Win_bytes_backward <= 232.00
+|   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Init_Win_bytes_backward >  232.00
+|   |   |   |   |   |   |--- min_seg_size_forward <= 26.00
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 3097686.88
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  3097686.88
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |--- min_seg_size_forward >  26.00
+|   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |--- Fwd Packet Length Max >  435.50
+|   |   |   |   |   |--- Subflow Fwd Packets <= 1.50
+|   |   |   |   |   |   |--- Flow IAT Mean <= 112.25
+|   |   |   |   |   |   |   |--- Total Backward Packets <= 1.50
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |   |--- Total Backward Packets >  1.50
+|   |   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |   |--- Flow IAT Mean >  112.25
+|   |   |   |   |   |   |   |--- class: DoS Slowhttptest
+|   |   |   |   |   |--- Subflow Fwd Packets >  1.50
+|   |   |   |   |   |   |--- Total Backward Packets <= 1.50
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 425.75
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  425.75
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Total Backward Packets >  1.50
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 99.42
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  99.42
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |--- Subflow Fwd Packets >  5.50
+|   |   |   |   |--- act_data_pkt_fwd <= 2.50
+|   |   |   |   |   |--- Total Backward Packets <= 8.50
+|   |   |   |   |   |   |--- Flow IAT Mean <= 1947161.75
+|   |   |   |   |   |   |   |--- Subflow Fwd Packets <= 6.50
+|   |   |   |   |   |   |   |   |--- class: PortScan
+|   |   |   |   |   |   |   |--- Subflow Fwd Packets >  6.50
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |   |   |   |--- Flow IAT Mean >  1947161.75
+|   |   |   |   |   |   |   |--- Bwd Packets/s <= 0.21
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Bwd Packets/s >  0.21
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |--- Total Backward Packets >  8.50
+|   |   |   |   |   |   |--- Flow IAT Mean <= 2267445.12
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Flow IAT Mean >  2267445.12
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |--- act_data_pkt_fwd >  2.50
+|   |   |   |   |   |--- Total Backward Packets <= 8.50
+|   |   |   |   |   |   |--- Fwd Packet Length Max <= 903.50
+|   |   |   |   |   |   |   |--- Subflow Fwd Packets <= 8.50
+|   |   |   |   |   |   |   |   |--- class: DoS Hulk
+|   |   |   |   |   |   |   |--- Subflow Fwd Packets >  8.50
+|   |   |   |   |   |   |   |   |--- class: DoS GoldenEye
+|   |   |   |   |   |   |--- Fwd Packet Length Max >  903.50
+|   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |--- Total Backward Packets >  8.50
+|   |   |   |   |   |   |--- Fwd Packet Length Max <= 10500.00
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max <= 5835.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |   |--- Fwd Packet Length Max >  5835.50
+|   |   |   |   |   |   |   |   |--- class: BENIGN
+|   |   |   |   |   |   |--- Fwd Packet Length Max >  10500.00
+|   |   |   |   |   |   |   |--- Flow IAT Mean <= 4002.43
+|   |   |   |   |   |   |   |   |--- class: Bot
+|   |   |   |   |   |   |   |--- Flow IAT Mean >  4002.43
+|   |   |   |   |   |   |   |   |--- class: BENIGN
