@@ -11,6 +11,7 @@ from controlplane.record import EscalationRecord
 from agents import base
 from agents.grounding import HypothesisSupport, apply_empirical_plausibility_cap
 from agents.prompts import a5_verdict_v5 as prompt_module
+from agents.prompts import a5_verdict_v6
 from agents.schema import A5Response, Claim, ClaimsResponse, Hypothesis, HypothesisResponse
 from agents.validators import validate_a5_addresses_all_contradictions, validate_a5_credits_a_real_hypothesis
 from agents.verification import VerificationCounts, counts_by_agent, match_claims
@@ -33,6 +34,7 @@ def run(
     use_cache: bool = True,
     fault_condition: str = base.CLEAN_FAULT_CONDITION,
     verification_override: Optional[Dict[str, VerificationCounts]] = None,
+    evidence_block: Optional[str] = None,
 ) -> Tuple[A5Response, base.CallMetadata, bool]:
     """``verification_override``: for eval/fault_injection.py's
     ``faulty_verification`` condition only -- A5's prompt normally shows
@@ -55,10 +57,19 @@ def run(
 
     known_hypothesis_ids: Set[str] = {h.hypothesis_id for h in all_hypotheses}
 
-    prompt = prompt_module.build_prompt(
-        record, chain_claims, chain_hypotheses, a4.claims, a4.hypotheses,
-        verification_by_agent, required_claim_ids, empirical_support_lines,
-    )
+    # evidence_block None keeps the v5 prompt and its cache keys; a block selects v6
+    if evidence_block is None:
+        module = prompt_module
+        prompt = module.build_prompt(
+            record, chain_claims, chain_hypotheses, a4.claims, a4.hypotheses,
+            verification_by_agent, required_claim_ids, empirical_support_lines,
+        )
+    else:
+        module = a5_verdict_v6
+        prompt = module.build_prompt(
+            record, chain_claims, chain_hypotheses, a4.claims, a4.hypotheses,
+            verification_by_agent, required_claim_ids, empirical_support_lines, evidence_block,
+        )
     known_ids: Set[str] = {c.claim_id for c in chain_claims} | {c.claim_id for c in a4.claims}
 
     def validate(response: A5Response) -> None:
@@ -69,7 +80,7 @@ def run(
     response, meta = base.call_structured(
         record_id=record.flow_id,
         agent=AGENT,
-        prompt_version=prompt_module.PROMPT_VERSION,
+        prompt_version=module.PROMPT_VERSION,
         prompt=prompt,
         response_schema=A5Response,
         model=model,

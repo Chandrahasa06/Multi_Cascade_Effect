@@ -169,7 +169,7 @@ def run_missing_evidence(
         record, grounding.empirical_grounding_block, grounding.available_features,
         grounding.known_reference_features, **fc,
     )
-    a2_resp, a2_meta = a2_behaviour.run(record, a1, **fc)
+    a2_resp, a2_meta = a2_behaviour.run(record, a1, grounding.empirical_grounding_block, **fc)
     a3_resp, a3_meta = a3_hypotheses.run(
         record, a1, a2_resp, grounding.empirical_grounding_block, grounding.available_features,
         grounding.known_reference_features, **fc,

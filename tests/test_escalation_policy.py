@@ -211,7 +211,11 @@ class TestSignatureTableSaturationDiagnostic:
             "bwd_pkt_len_mean": np.random.default_rng(4).random(n) * 100,
             "pkt_len_range": np.random.default_rng(5).random(n) * 50,
         })
-        table = build_signature_table(df, n_bins=6, floor=1)
+        # syn_without_synack_count was removed from PRIORITY2_FEATURES (change 1);
+        # the diagnostic is still exercised on it by passing the feature explicitly.
+        table = build_signature_table(df, n_bins=6, floor=1, features=(
+            "flows_per_src", "distinct_dst_ports_per_src", "syn_without_synack_count",
+            "bwd_pkt_len_mean", "pkt_len_range"))
         report = check_bin_tie_saturation(df, table)
         degenerate = report[report["feature"] == "syn_without_synack_count"]
         assert (degenerate["tied_mass"] == 1.0).any()

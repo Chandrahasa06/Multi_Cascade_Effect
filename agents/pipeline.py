@@ -298,7 +298,7 @@ def run_record(
         )
 
         a1_resp, a1_meta = a1_evidence.run(record, grounding.empirical_grounding_block, **call_kwargs)
-        a2_resp, a2_meta = a2_behaviour.run(record, a1_resp, **call_kwargs)
+        a2_resp, a2_meta = a2_behaviour.run(record, a1_resp, grounding.empirical_grounding_block, **call_kwargs)
         a3_resp, a3_meta = a3_hypotheses.run(
             record, a1_resp, a2_resp, grounding.empirical_grounding_block, grounding.available_features,
             grounding.known_reference_features, **call_kwargs,

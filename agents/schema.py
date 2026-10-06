@@ -205,6 +205,59 @@ class A5Response(BaseModel):
     rationale: str
 
 
+#: Fixed anchor points for the diagnostic fixed-scale A5 variant
+#: (results/plausibility_diagnostic.md, Step 3) -- A5's free [0,1] number
+#: is suspected of collapsing onto a handful of round values by habit,
+#: not by genuine judgment; forcing a choice from an evenly-spaced,
+#: verbally-anchored 10-point scale tests whether the model uses the
+#: middle of the range when the format no longer lets it default to
+#: "0.25-ish" or "0.85-ish". Deliberately does NOT include 0.3 or 0.7
+#: (derive_verdict's own thresholds) -- the point is to see where the
+#: model lands when it can't just restate a threshold it already knows.
+A5_SCALE_VALUES: tuple[float, ...] = (0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95)
+
+
+class A5ScaleResponse(BaseModel):
+    """Diagnostic-only variant of A5Response (see A5_SCALE_VALUES): same
+    fields and meaning, except benign_plausibility must be exactly one of
+    the fixed anchor points rather than a free [0,1] float. Never used by
+    the real pipeline (agents/a5_verdict.py, agents/pipeline.py) -- only
+    by eval/run_a5_scale.py's diagnostic re-elicitation."""
+
+    benign_plausibility: float
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+    credited_hypothesis_id: Optional[str] = None
+    cited_claim_ids: List[str]
+    rationale: str
+
+    @model_validator(mode="after")
+    def _plausibility_on_scale(self) -> "A5ScaleResponse":
+        if not any(abs(self.benign_plausibility - v) < 1e-9 for v in A5_SCALE_VALUES):
+            raise ValueError(
+                f"benign_plausibility must be exactly one of {A5_SCALE_VALUES}, got "
+                f"{self.benign_plausibility!r}"
+            )
+        return self
+
+
+class RankingResponse(BaseModel):
+    """Diagnostic-only (results/plausibility_diagnostic.md Step 4):
+    a rank ordering of a batch of records from most to least likely
+    benign, with NO numeric score requested at all -- tests whether the
+    agents' relative judgment separates attacks from benign better than
+    their own absolute benign_plausibility numbers do. ``ranking`` must
+    be a permutation of the record_ids shown (checked by the caller's
+    ``extra_validate``, since the model doesn't know the expected id set
+    at class-definition time -- same pattern as
+    validate_a5_credits_a_real_hypothesis). Never used by the real
+    pipeline; only by eval/run_a5_rank.py."""
+
+    ranking: List[str]
+    rationale: str
+
+
 #: Default two-threshold mapping from benign_plausibility to the
 #: three-way VerdictLabel, for reporting/confusion-matrix purposes only.
 #: These are a starting point, not a finding -- explicitly meant to be
@@ -261,3 +314,18 @@ class BaselineResponse(BaseModel):
 CLAIM_ONLY_AGENTS = frozenset({"a1", "a2"})
 #: agents whose response is claims + hypotheses (A3 chain-fed, A4 blind).
 HYPOTHESIS_AGENTS = frozenset({"a3", "a4"})
+
+
+class TwoSidedA5Response(BaseModel):
+    """Reframe arm C's A5 response: the same fields as A5Response, plus an
+    independent attack_plausibility. The two scores need not sum to 1. The verdict is
+    derived from the pair in agents/verdict_rules.py, under a fixed rule."""
+
+    benign_plausibility: float = Field(ge=0.0, le=1.0)
+    attack_plausibility: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+    credited_hypothesis_id: Optional[str] = None
+    cited_claim_ids: List[str]
+    rationale: str

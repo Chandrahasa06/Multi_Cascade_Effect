@@ -5,7 +5,10 @@ from __future__ import annotations
 from controlplane.record import EscalationRecord
 
 from agents import base
+from typing import Optional
+
 from agents.prompts import a3_hypotheses_v5 as prompt_module
+from agents.prompts import a3_hypotheses_v6
 from agents.schema import ClaimsResponse, HypothesisResponse
 from agents.validators import validate_hypothesis_response
 
@@ -25,14 +28,23 @@ def run(
     run_index: int = 0,
     use_cache: bool = True,
     fault_condition: str = base.CLEAN_FAULT_CONDITION,
+    evidence_block: Optional[str] = None,
 ) -> tuple[HypothesisResponse, base.CallMetadata]:
-    prompt = prompt_module.build_prompt(
-        record, a1.claims, a2.claims, empirical_grounding_block, available_features
-    )
+    # evidence_block None keeps the v5 prompt and its cache keys; a block selects v6
+    if evidence_block is None:
+        module = prompt_module
+        prompt = module.build_prompt(
+            record, a1.claims, a2.claims, empirical_grounding_block, available_features
+        )
+    else:
+        module = a3_hypotheses_v6
+        prompt = module.build_prompt(
+            record, a1.claims, a2.claims, empirical_grounding_block, available_features, evidence_block
+        )
     return base.call_structured(
         record_id=record.flow_id,
         agent=AGENT,
-        prompt_version=prompt_module.PROMPT_VERSION,
+        prompt_version=module.PROMPT_VERSION,
         prompt=prompt,
         response_schema=HypothesisResponse,
         model=model,

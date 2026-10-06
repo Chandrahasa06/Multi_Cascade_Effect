@@ -2,7 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from agents.schema import (
+    A5_SCALE_VALUES,
     A5Response,
+    A5ScaleResponse,
     Claim,
     FeatureReference,
     Hypothesis,
@@ -196,3 +198,37 @@ def test_derive_verdict_thresholds_are_overridable_for_sweeping():
     # the whole point of moving the verdict into code (sweepable).
     assert derive_verdict(0.6, low_threshold=0.2, high_threshold=0.5) == VerdictLabel.CONSISTENT_WITH_BENIGN
     assert derive_verdict(0.6, low_threshold=0.2, high_threshold=0.9) == VerdictLabel.ANOMALOUS_BUT_EXPLICABLE
+
+
+# ---------- A5ScaleResponse: results/plausibility_diagnostic.md Step 3 ----------
+
+_SCALE_KWARGS = dict(confidence=0.8, evidence_support=0.8, verification=0.8, cited_claim_ids=["a1_c1"], rationale="r")
+
+
+@pytest.mark.parametrize("value", A5_SCALE_VALUES)
+def test_a5_scale_response_accepts_every_anchor_point(value):
+    resp = A5ScaleResponse(benign_plausibility=value, **_SCALE_KWARGS)
+    assert resp.benign_plausibility == value
+
+
+@pytest.mark.parametrize("value", [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.26, 0.849999])
+def test_a5_scale_response_rejects_every_off_grid_value(value):
+    with pytest.raises(ValidationError):
+        A5ScaleResponse(benign_plausibility=value, **_SCALE_KWARGS)
+
+
+def test_a5_scale_response_rejects_out_of_range_value_too():
+    with pytest.raises(ValidationError):
+        A5ScaleResponse(benign_plausibility=1.5, **_SCALE_KWARGS)
+
+
+def test_a5_scale_values_has_exactly_ten_evenly_spaced_points():
+    assert len(A5_SCALE_VALUES) == 10
+    diffs = [round(b - a, 10) for a, b in zip(A5_SCALE_VALUES, A5_SCALE_VALUES[1:])]
+    assert all(d == pytest.approx(0.1) for d in diffs)
+    assert A5_SCALE_VALUES[0] == pytest.approx(0.05)
+    assert A5_SCALE_VALUES[-1] == pytest.approx(0.95)
+    # deliberately excludes both of derive_verdict's own thresholds -- see
+    # agents/schema.py's A5_SCALE_VALUES docstring.
+    assert 0.3 not in A5_SCALE_VALUES
+    assert 0.7 not in A5_SCALE_VALUES

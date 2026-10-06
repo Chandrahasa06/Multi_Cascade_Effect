@@ -13,7 +13,7 @@ checkable against this pipeline's own data).
 from __future__ import annotations
 
 import re
-from typing import Iterable, Set
+from typing import Iterable, List, Set
 
 from agents.schema import ClaimsResponse, HypothesisResponse
 
@@ -61,6 +61,61 @@ _NON_FLOW_LEVEL_PATTERNS = [
     for term in _NON_FLOW_LEVEL_CONCEPTS
 ]
 
+#: The two payload terms are the only ones with an exception. A claim about the
+#: ABSENCE or SIZE of payload is a claim about byte counts, which CICFlowMeter's
+#: flow statistics do observe (e.g. Total Length of Fwd Packets == 0). A claim
+#: about payload CONTENTS is not observable and stays banned. The original
+#: filter matched the bare token regardless of polarity, so it rejected both.
+_PAYLOAD_TERMS = frozenset({"payload", "payloads"})
+
+#: Markers of absence or size. A sentence needs one of these for a payload term
+#: to pass.
+_ABSENCE_OR_SIZE = re.compile(
+    r"\b(without|no|zero|lack|lacks|lacking|absence|absent|none|nil|empty"
+    r"|size|length|bytes?|volume|count|total|amount|quantity)\b",
+    re.IGNORECASE,
+)
+
+#: Markers that a sentence is describing payload CONTENT even when it also says
+#: "zero" or "without". "zero payload but contains HTTP headers" is still a
+#: content claim.
+#: A content VERB is ignored when it is directly negated ("carry no payload",
+#: "contains zero bytes"): that is an absence claim. The content NOUNS and the
+#: verbs without negation still veto ("carries a login string", "contains a body").
+_PAYLOAD_CONTENT = re.compile(
+    r"\b(?:(?:contains?|carr(?:y|ies)|includes?|encodes?)\b(?!\s+(?:no|zero|any|nil|empty)\b)"
+    r"|encoded|strings?|keywords?|patterns?|contents?|body|json|html|mime|uris?|urls?)\b",
+    re.IGNORECASE,
+)
+
+_PAYLOAD_PATTERNS = {
+    term: pattern for term, pattern in zip(_NON_FLOW_LEVEL_CONCEPTS, _NON_FLOW_LEVEL_PATTERNS)
+    if term in _PAYLOAD_TERMS
+}
+
+
+def _sentences(text: str) -> List[str]:
+    return [s for s in re.split(r"(?<=[.;!?])\s+|\n+", text) if s.strip()]
+
+
+def payload_claim_is_flow_observable(sentence: str) -> bool:
+    """True when a sentence that mentions payload states its absence or size and
+    says nothing about its contents. Such a claim is checkable against flow
+    statistics. Anything else (including "zero payload but contains ...") is not."""
+    return bool(_ABSENCE_OR_SIZE.search(sentence)) and not _PAYLOAD_CONTENT.search(sentence)
+
+
+def unobservable_payload_terms(prediction: str) -> List[str]:
+    """Payload terms that appear in a sentence NOT stating absence or size.
+    A term whose every occurrence is an absence or size claim is not returned."""
+    found = []
+    for term, pattern in _PAYLOAD_PATTERNS.items():
+        for sentence in _sentences(prediction):
+            if pattern.search(sentence) and not payload_claim_is_flow_observable(sentence):
+                found.append(term)
+                break
+    return found
+
 
 def validate_claim_ids(agent: str, response: ClaimsResponse) -> None:
     prefix = f"{agent}_c"
@@ -95,9 +150,11 @@ def validate_hypothesis_predictions_are_flow_level(
                 f"{unknown}, not in the benign-reference feature vocabulary (no empirical data to "
                 "test this prediction against)"
             )
+        unobservable_payload = set(unobservable_payload_terms(hyp.prediction))
         hits = [
             term for term, pattern in zip(_NON_FLOW_LEVEL_CONCEPTS, _NON_FLOW_LEVEL_PATTERNS)
             if pattern.search(hyp.prediction)
+            and (term not in _PAYLOAD_TERMS or term in unobservable_payload)
         ]
         if hits:
             raise ValueError(

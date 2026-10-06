@@ -206,7 +206,7 @@ def test_a4_prompt_never_receives_chain_output(canned):
     # with no chain in scope at all, must reproduce the exact string the
     # pipeline actually sent, proving nothing else could have been mixed
     # in via pipeline wiring.
-    from agents.prompts import a4_replication_v5
+    from agents.prompts import a4_replication_v6
     from agents.grounding import compute_nearest_neighbours, render_available_profile_features, render_empirical_grounding_block
     from controlplane.reference import get_reference_distribution, load_benign_dataframe
 
@@ -215,7 +215,7 @@ def test_a4_prompt_never_receives_chain_output(canned):
     nn = compute_nearest_neighbours(record, benign_df, reference)
     block = render_empirical_grounding_block(record, reference, nn)
     available = render_available_profile_features(reference)
-    assert a4_prompt == a4_replication_v5.build_prompt(record, block, available)
+    assert a4_prompt == a4_replication_v6.build_prompt(record, block, available)
 
     # every claim statement and hypothesis description from A1/A2/A3
     # (canned above) must be absent verbatim -- not just the two

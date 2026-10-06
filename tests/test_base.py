@@ -144,6 +144,41 @@ def test_call_structured_raises_after_max_schema_retries(monkeypatch):
         )
 
 
+def test_schema_validation_failed_carries_full_attempt_history(monkeypatch):
+    # every attempt returned different, invalid JSON -- both the raw text
+    # and the per-attempt validation error must survive on the exception,
+    # not just the last one (previously only last_error was kept).
+    responses = ["not json at all", '{"value": "not an int"}', "{broken"]
+    calls = {"n": 0}
+
+    def fake_raw_generate(client, model, prompt, response_schema, temperature):
+        text = responses[calls["n"]]
+        calls["n"] += 1
+        return text, 1, 1
+
+    monkeypatch.setattr(base, "_raw_generate", fake_raw_generate)
+
+    with pytest.raises(base.SchemaValidationFailed) as excinfo:
+        base.call_structured(
+            record_id="r1", agent="a1", prompt_version="v1", prompt="p",
+            response_schema=_Resp, model="m", temperature=0.7, run_index=0,
+        )
+    exc = excinfo.value
+    assert len(exc.retry_reasons) == base.MAX_SCHEMA_RETRIES
+    assert len(exc.raw_attempts) == base.MAX_SCHEMA_RETRIES
+    assert exc.raw_attempts == responses
+    # the three rejections are for different reasons (bad JSON, wrong
+    # type, malformed JSON) -- confirms retry_reasons isn't just the same
+    # string repeated MAX_SCHEMA_RETRIES times.
+    assert len(set(exc.retry_reasons)) > 1
+
+
+def test_schema_validation_failed_defaults_retry_reasons_from_last_error():
+    exc = base.SchemaValidationFailed("a1", "r1", 3, ValueError("boom"))
+    assert exc.retry_reasons == ["boom"]
+    assert exc.raw_attempts == []
+
+
 def test_call_structured_extra_validate_triggers_retry(monkeypatch):
     calls = {"n": 0}
 

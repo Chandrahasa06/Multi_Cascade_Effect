@@ -1827,3 +1827,105 @@ Slow DoS (Slowhttptest/slowloris) is NOT a clean failure -- it's
 partially detected and threshold-sensitive, more nuanced than "failing
 by design." No number was tuned toward a target; every table above is
 what the measurements produced.
+
+## Fifth silent-disable: `close_to_observed_count` undefined for every hypothesis, blind agent run
+
+Same shape as the four percentile-saturation instances above (a
+computed value that exists, looks plausible, and means nothing): the
+first blind agent-pipeline run over the 20 selected escalated flows
+(`results/agent_scoring_20.md`, superseded by `_v2`) scored **0/11
+attacks**, every one of 20 records landing at `benign_plausibility`
+0.75-0.99. `close_to_observed_count` (agents/grounding.py's per-flow
+"are real benign flows actually close to THIS flow's own value"
+refinement) was undefined for **116/116 hypotheses evaluated across the
+run** -- not a few edge cases, all of them.
+
+Root cause: `close_to_observed_count` is derived entirely from
+`record.trigger_reasons` (`agents/grounding.py::observed_tier1_values`).
+This project's newer DT-rule-compiled escalation policy
+(`dataplane/dt_rules.py`, `eval/escalation_eval.py`) has no equivalent of
+`dataplane/selector.py`'s Tier-1 trigger-reason concept, so every
+`EscalationRecord` built for that blind run carried `trigger_reasons=[]`
+(`eval/run_blind_pipeline.py`). `observed_tier1_values` silently turns an
+empty list into an empty dict, `checked_features` stays empty for every
+hypothesis, and `close_to_observed_count` is `None` by the existing,
+already-anticipated "no observed value for any predicted feature"
+branch -- correct code, wrong assumption about its input, no error
+anywhere. The generic check that survived
+(`matching_profile_count`, e.g. 258,258/566,864 = 45.6% for the traced
+DoS Hulk record) kept looking like a real number and answered a
+different, uninformative question: "does any benign flow fit this
+profile" instead of "is THIS flow unusual."
+
+**The shared shape across all five instances**: a downstream consumer
+(a percentile threshold, a bin edge, now a per-flow closeness check)
+silently receives degenerate input (all mass at a bound, an unreachable
+edge, an empty trigger-reason list) and keeps producing a
+plausible-looking number instead of failing loud. Fixed the same way
+each time this project has hit it: detect the degenerate condition
+explicitly and either omit the feature/refuse the computation (the four
+percentile-saturation fixes, `dataplane/fitting.py`) or raise loudly past
+a threshold (`agents/grounding.py::assert_close_to_observed_coverage`,
+`GroundingCoverageError` -- this fifth instance's fix, called at the end
+of a scoring run over every hypothesis evaluated, not per-record, so a
+handful of individually-uncheckable hypotheses can't trip it but a
+structurally-broken input always does).
+
+**Repair** (`agents/escalation_grounding.py`, additive, no existing
+grounding code modified): the benign comparison set is now built
+directly in the escalation policy's own 10-feature CICFlowMeter space
+(`dataplane/dt_rules.py`'s features), from real BENIGN rows in the same
+CICIDS2017 CSV pool the escalation policy itself reads
+(`eval.escalation_data.load_pool()`, 2,273,097 real benign flows,
+already cached) -- never from `record.trigger_reasons`, and never from
+`class_predicted`/`rule_id`/`priority`/`reason` (asserted by
+`tests/test_escalation_grounding.py`, both by signature inspection and
+by confirming identical output regardless of escalation metadata
+upstream). A flow with zero real benign neighbours in this space is
+reported `ungrounded`, not silently folded into "benign" -- a NEW,
+additional cap (`apply_ungrounded_neighbourhood_cap`, 0.3) fires on that
+condition alone, independent of the existing zero-match cap. Verified on
+the traced DoS Hulk record: neighbourhood size 0/2,273,097 (0%, vs. the
+old 45.6% generic match) -- `Init_Win_bytes_forward=0` alone already
+outside anything real benign traffic on this network does jointly with
+its other nine escalation-feature values.
+
+## Correction: the Youden-optimum claim above overstates precision that discretisation, not tuning, produced
+
+The n=159 threshold-sweep entry above ("Threshold sweep + reconfirmed
+ceiling") states that `LOW=0.3` "ties the empirical Youden's-J maximum
+(+0.515) exactly, because no record's `benign_plausibility` falls in
+(0.25, 0.30]". Re-checked directly (`results/threshold_sweep.json`,
+`results/agent_pipeline_200.jsonl`, zero new API calls) while producing
+`results/plausibility_diagnostic.md`: **7 of 159 records score exactly
+0.30**, so the written interval should have been the open `(0.25,
+0.30)`, not the half-open `(0.25, 0.30]` -- a bracket slip, not a data
+error (`0.275`, the sweep's nearest candidate cut to 0.3, genuinely is
+the unique J-maximising row; `tie_range` is correctly `null`, i.e. no
+plateau of tied cuts). Once corrected, the claim is true but weaker than
+it reads: `T=0.275` "ties" 0.3 only because the sweep's candidate cuts
+are midpoints between distinct *observed* values, and 0.3 was never
+itself an evaluated candidate -- the real content of the claim is "no
+record scores strictly between 0.25 and 0.30", a 0.05-wide empty
+region, not evidence that 0.3 was located precisely.
+
+The SAME phenomenon, far more severe, was independently found analysing
+the 36-record v2/batch-2 agent run for `results/plausibility_diagnostic.md`
+Step 1: `benign_plausibility` takes only **7 distinct values across 36
+records**, 63.9% of them exactly 0.25 or 0.85, with a **0.55-wide empty
+region between 0.30 and 0.85** -- every cut in `(0.30, 0.85)` produces
+an identical confusion matrix, not just a narrow band around one
+threshold. Every other numeric field every agent emits (A1-A4's
+self-reported confidence/evidence_support/verification, A5's own
+confidence/evidence_support) is discretised at least as heavily
+(`a4.evidence_support`: 3 distinct values across 36, 97.2% on just two
+of them) -- this is a general property of how these models report
+free-form [0,1] self-estimates, not something specific to
+`benign_plausibility` or to this one sweep. See
+`results/plausibility_diagnostic.md` for the full histogram, the
+fixed-10-point-scale re-elicitation that tests whether it's a format
+artifact (mostly not, except for one specific, fixable coincidence: the
+0.3 zero-support cap and the 0.3 verdict threshold are the same number,
+which cost exactly 2/23 recall on genuinely-ungrounded records that
+self-scored precisely at the boundary), and the rank-ordering AUC
+comparison (Step 4).

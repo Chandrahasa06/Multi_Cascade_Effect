@@ -6,7 +6,7 @@ from __future__ import annotations
 from controlplane.record import EscalationRecord
 
 from agents import base
-from agents.prompts import a4_replication_v5 as prompt_module
+from agents.prompts import a4_replication_v6 as prompt_module
 from agents.schema import HypothesisResponse
 from agents.validators import validate_hypothesis_response
 

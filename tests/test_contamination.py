@@ -138,11 +138,14 @@ def test_prompt_templates_never_contain_banned_terms():
         "a4_replication_v3",
         "a4_replication_v4",
         "a4_replication_v5",
+        "a4_replication_v6",
         "a5_verdict_v1",
         "a5_verdict_v2",
         "a5_verdict_v3",
         "a5_verdict_v4",
         "a5_verdict_v5",
+        "a5_verdict_scale_v1",
+        "a5_ranking_v1",
         "baseline_v1",
         "baseline_v2",
     ]
@@ -179,10 +182,12 @@ def test_a4_prompt_never_mentions_other_reviewers():
         a4_replication_v3,
         a4_replication_v4,
         a4_replication_v5,
+        a4_replication_v6,
     )
 
     for mod in (
         a4_replication_v1, a4_replication_v2, a4_replication_v3, a4_replication_v4, a4_replication_v5,
+        a4_replication_v6,
     ):
         text = mod._INSTRUCTIONS.lower()
         for forbidden in ("reviewer", "prior stage", "chain", "other agent", "a1", "a2", "a3", "a5"):

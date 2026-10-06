@@ -110,7 +110,10 @@ class DailyQuotaExceeded(RuntimeError):
 
 
 class SchemaValidationFailed(RuntimeError):
-    def __init__(self, agent: str, record_id: str, attempts: int, last_error: Exception):
+    def __init__(
+        self, agent: str, record_id: str, attempts: int, last_error: Exception,
+        retry_reasons: Optional[List[str]] = None,
+    ):
         super().__init__(
             f"{agent}/{record_id}: response failed schema validation after "
             f"{attempts} attempts: {last_error}"
@@ -119,6 +122,24 @@ class SchemaValidationFailed(RuntimeError):
         self.record_id = record_id
         self.attempts = attempts
         self.last_error = last_error
+        #: one entry per rejected attempt (same shape as CallMetadata.
+        #: retry_reasons for a call that eventually succeeds) -- previously
+        #: only `last_error` (the final attempt) survived past this
+        #: exception, so "did the model repeat the same violation across
+        #: attempts or produce a new one each time" was unanswerable for
+        #: any record that exhausted its retries, since call_structured's
+        #: own retry_reasons list was discarded on the raise path. Defaults
+        #: to a single-entry list from `last_error` when not given, so a
+        #: caller that never passes this still gets a non-empty, correct
+        #: (if incomplete) list rather than silently empty.
+        self.retry_reasons: List[str] = retry_reasons if retry_reasons is not None else [str(last_error)]
+        #: raw model output text for every attempt (index-aligned with
+        #: retry_reasons), set by call_structured -- separate from
+        #: retry_reasons (the validation ERROR) so a caller can see both
+        #: what A3 actually said and why it was rejected, per attempt.
+        #: Empty unless call_structured populates it (kept optional here
+        #: too, for the same backward-compatibility reason as above).
+        self.raw_attempts: List[str] = []
 
 
 class _TokenBucket:
@@ -427,12 +448,14 @@ def call_structured(
     last_err: Optional[Exception] = None
     schema_retries = 0
     retry_reasons: List[str] = []
+    raw_attempts: List[str] = []
     input_tokens = output_tokens = None
 
     for attempt in range(MAX_SCHEMA_RETRIES):
         raw_text, input_tokens, output_tokens = _raw_generate(
             client, model, working_prompt, response_schema, temperature
         )
+        raw_attempts.append(raw_text)
         try:
             candidate = response_schema.model_validate_json(raw_text)
             if extra_validate is not None:
@@ -450,7 +473,9 @@ def call_structured(
             )
 
     if parsed_obj is None:
-        raise SchemaValidationFailed(agent, record_id, MAX_SCHEMA_RETRIES, last_err)
+        failure = SchemaValidationFailed(agent, record_id, MAX_SCHEMA_RETRIES, last_err, list(retry_reasons))
+        failure.raw_attempts = list(raw_attempts)
+        raise failure
 
     elapsed = time.monotonic() - start
     if use_cache:

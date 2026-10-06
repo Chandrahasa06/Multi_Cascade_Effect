@@ -33,7 +33,10 @@ from agents.schema import A5Response, Hypothesis
 #: A5's benign_plausibility may not exceed this when the hypothesis it
 #: credits has zero empirically-matching benign flows -- fixed, not
 #: prompt-negotiable (agents/schema.py::A5Response's own docstring).
-ZERO_SUPPORT_PLAUSIBILITY_CAP = 0.3
+#: 0.29, not 0.3: derive_verdict treats bp < 0.3 as ANOMALOUS_AND_UNEXPLAINED,
+#: so a clamp to exactly 0.3 lands on the boundary and reads as explicable.
+#: The verdict threshold is unchanged; the cap sits just under it.
+ZERO_SUPPORT_PLAUSIBILITY_CAP = 0.29
 
 
 def _strip_prefix(feature: str) -> str:
@@ -238,3 +241,66 @@ def apply_empirical_plausibility_cap(
         clamped = response.model_copy(update={"benign_plausibility": cap})
         return clamped, True
     return response, False
+
+
+# --------------------------------------------------------------------- #
+# Loud-failure guard: close_to_observed_count silently undefined for
+# (almost) everything is a real, recurring failure shape in this project
+# -- see STATUS.md's "fifth silent-disable" entry. A live blind run
+# (results/agent_scoring_20.md, the run before this guard existed) had
+# close_to_observed_count undefined for 116/116 hypotheses because the
+# EscalationRecords it scored carry trigger_reasons=[] (this project's
+# newer DT-rule escalation policy has no Tier-1 trigger-reason concept at
+# all), which observed_tier1_values silently turns into an empty dict --
+# every downstream "close to observed" check then silently has nothing to
+# check, and the run still produced plausible-looking numbers (a
+# generic-support count, unrelated to whether any specific flow is
+# actually unusual) with no warning anywhere. This guard makes that shape
+# loud instead of quiet.
+# --------------------------------------------------------------------- #
+
+class GroundingCoverageError(RuntimeError):
+    """Raised when too large a fraction of a run's HypothesisSupport
+    entries have an undefined close_to_observed_count -- signals that
+    empirical grounding's per-flow "is THIS flow close to real benign
+    traffic" check never actually ran, even though a generic
+    matching_profile_count may still look plausible. Callers should
+    treat any benign_plausibility computed under this condition as
+    meaningless, not just weakly supported."""
+
+
+#: default alarm threshold -- deliberately loose (a handful of records
+#: legitimately having no checkable predicted feature is normal; the
+#: whole run silently losing this check is not).
+DEFAULT_UNDEFINED_FRACTION_THRESHOLD = 0.5
+
+
+def close_to_observed_coverage(supports) -> Tuple[int, int]:
+    """(n_undefined, n_total) across an iterable of HypothesisSupport."""
+    supports = list(supports)
+    n_total = len(supports)
+    n_undefined = sum(1 for s in supports if s.close_to_observed_count is None)
+    return n_undefined, n_total
+
+
+def assert_close_to_observed_coverage(
+    supports, threshold: float = DEFAULT_UNDEFINED_FRACTION_THRESHOLD, context: str = "",
+) -> None:
+    """Raises GroundingCoverageError if more than `threshold` of `supports`
+    have an undefined close_to_observed_count. Called at the end of a run
+    (across every hypothesis scored, not per-record), so a handful of
+    individually-uncheckable hypotheses can't trip it, but a
+    structurally-broken grounding input (e.g. every record missing the
+    data close_to_observed_count depends on) always does."""
+    n_undefined, n_total = close_to_observed_coverage(supports)
+    if n_total == 0:
+        return
+    frac = n_undefined / n_total
+    if frac > threshold:
+        prefix = f"{context}: " if context else ""
+        raise GroundingCoverageError(
+            f"{prefix}{n_undefined}/{n_total} ({frac:.0%}) hypotheses have an undefined "
+            f"close_to_observed_count (alarm threshold {threshold:.0%}) -- empirical grounding's "
+            "per-flow closeness check did not run for most of this run. See STATUS.md's "
+            "\"fifth silent-disable\" entry before trusting any benign_plausibility computed here."
+        )
