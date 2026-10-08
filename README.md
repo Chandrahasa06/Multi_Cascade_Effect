@@ -1,154 +1,46 @@
-# Multi-Cascade Effect — Data Plane + Zero-Day-Safe Selector
+# Multi-Cascade Effect: zero-day intrusion triage on CICIDS2017
 
-An SDN intrusion-detection pipeline for zero-day attacks, built in two
-stages (this repo covers both, not the downstream agent pipeline):
+## What it does
 
-1. **Data plane** — O(1), integer-only, fixed-capacity per-flow and
-   per-source counters, checked against benign-fitted thresholds by a
-   selector that decides which flows to escalate.
-2. **Control plane** — escalated flows get full CICFlowMeter feature
-   extraction, anonymised, and packaged as a serialisable handoff record.
+A programmable data plane keeps cheap per-flow and per-source counters and escalates a small budget of suspicious flows to a controller. The controller extracts full CICFlowMeter features for each escalated flow and grounds it against real benign traffic: how many ordinary flows on this network look like this one. A five-agent LLM pipeline then reads the flow and that grounding and decides whether it has a benign explanation the data supports.
 
-Zero-day safety is enforced structurally: threshold fitting only ever
-sees benign traffic (`fitting.py` asserts this — see below), so the
-selector can never become a signature matcher for known attacks.
+## The pipeline, in order
 
-## Status
+| stage | what happens | open this |
+|---|---|---|
+| 1. Escalation, Priority 1 | supervised decision-tree rules (compiled from `tree.txt`) flag known attack shapes | `dataplane/dt_rules.py`, `eval/parse_tree.py` |
+| 1. Escalation, Priority 2 | benign-only signature table with a token-bucket meter; the only zero-day component | `dataplane/escalation_policy.py` |
+| 1. Escalation, Priority 3 | deterministic hash sampling, so unseen behaviour is sometimes observed | `dataplane/escalation_policy.py` |
+| 1. Escalation, evaluation | the three priorities run over the 2.83M-flow CSV pool | `eval/escalation_eval.py` (writes `escalation_report.md`), `eval/escalation_v3.py` (current defaults), `eval/escalation_data.py` |
+| 2. Feature extraction | full CICFlowMeter features and the record handed to the controller | `controlplane/extractor.py`, `controlplane/record.py` |
+| 3. Grounding | benign-neighbourhood count: benign flows within [0.5x, 2x] of this flow on ten features | `agents/escalation_grounding.py` |
+| 4. Agents | A1 evidence, A2 behaviour, A3 hypotheses, A4 blind replica, A5 verdict | `agents/pipeline.py`, `agents/a1_evidence.py` ... `agents/a5_verdict.py` |
+| 4. Agents, checks | schema, flow-level filter, trust scores | `agents/schema.py`, `agents/validators.py`, `agents/trust.py` |
+| 5. Blind evaluation | labels held in a separate key file; agents never see them | `eval/run_blind_pipeline.py` |
 
-Built and tested: `dataplane/` (flow table, per-flow and per-source
-counters, HyperLogLog sketch, selector), the CSV adapter, and
-`fitting.py`. Not yet built: `controlplane/` (CICFlowMeter extraction —
-blocked on real PCAPs), `eval/` (recall/escalation-rate sweep).
+Tests: `python -m pytest tests -q` (842 passing). The CICIDS2017 CSVs go in `data/`, which is not in the repository.
 
-## Running
+## Results
 
-```
-pip install -r requirements.txt
-python -m pytest tests/ -q
-python run_csv_stress_test.py   # stress-test the flow table on real CSV data
-```
+**The detector works. The agent layer does not add to it.**
 
-`dataplane/fitting.py` is built and tested (`fit_thresholds`, `save_thresholds`/
-`load_thresholds`) but not yet wired to a CLI entry point — that lands with
-the sweep script.
+- The benign-neighbourhood count separates attacks from benign flows: AUC 0.968 on the 44 blind-scored flows (29 attacks, 15 benign). That AUC uses a reference that includes the test days, so it is not a deployment figure.
+- With deployment-realistic grounding (Monday benign traffic only, flows from Tuesday onward), it catches 20 of 29 attacks and clears 13 of 13 benign flows. The samples are small (Wilson 95% intervals: 51-83% and 77-100%).
+- Across nine attempts to make the agents improve on that count, none did. (Seven are in the write-up; the eighth ran the agents only where the count says benign, and the ninth checked what the agents scored before the cap overwrote them.) No configuration caught more attacks than the count, and in most the verdict matched it record for record. Where the agents seemed to detect, they were either following a count shown to them or being overruled by a cap that applied the count. This is a measured negative result, and the most carefully tested part of the work.
 
-## Module layout
+| report | question it answers |
+|---|---|
+| [results/writeup_corrected.md](results/writeup_corrected.md) | Start here. The full argument: setup, the baseline, every attempt, and the limits. |
+| [results/count_baseline.md](results/count_baseline.md) | Do the agents beat a one-line threshold on the same count? (No: zero disagreements in 44 records.) |
+| [results/agent_reference_arms.md](results/agent_reference_arms.md) | What happens with deployment-realistic grounding (Monday only, Monday+Tuesday)? |
+| [results/cap_suppressed_scores.md](results/cap_suppressed_scores.md) | When the agents flag an attack, is it their own judgement? (No: 0 of 20 would have been flagged without the cap.) |
+| [results/grounding_explained.md](results/grounding_explained.md) | Exactly how the neighbourhood count is computed, with worked examples. |
+| [results/escalation_report.md](results/escalation_report.md) | How the three-priority data-plane policy performs on the full CSV pool. |
 
-```
-dataplane/
-  flow_state.py      per-flow counter struct (Packet, FlowState), O(1) update
-  flow_table.py       fixed-capacity table, keyed, eviction, KeyMode (fidelity/eval)
-  src_table.py        per-source sliding-window counters + HyperLogLog sketches
-  hyperloglog.py       from-scratch HLL cardinality sketch
-  selector.py          Tier-1/per-source feature computation, threshold comparison
-  fitting.py            benign-only threshold fitting
-adapters/
-  csv_flow_adapter.py  CICIDS2017 TrafficLabelling CSV -> Packet stream
-  pcap_adapter.py      real pcapng capture -> Packet stream (scapy PcapReader)
-tests/
-```
+The other files in `results/` are local only (not in the repository): intermediate runs, caches and superseded reports.
 
-## Known limitations
+## Limits
 
-**Ground truth is defined at CICFlowMeter's flow granularity, and the
-data plane doesn't necessarily share that definition — this is an
-irreducible join ambiguity, not a bug to fix.** CICFlowMeter decides
-where one flow record ends and the next begins (its own idle/active
-timeouts, its own handling of retransmits and reordering). Our flow
-table has its own, independently-implemented notion of the same thing.
-The two will not always agree on where a real conversation's boundaries
-are, so "what is this simulated flow's ground-truth label" doesn't
-always have a single correct answer — a simulated flow can legitimately
-span, or be spanned by, more than one CICFlowMeter-labeled row.
-
-We do not solve this; we sidestep it. `adapters/csv_flow_adapter.py`
-exposes `FlowTable.KeyMode`:
-
-- `KeyMode.FIDELITY` (plain 5-tuple) lets the table's own merge/timeout/
-  eviction behavior run and be measured honestly — this is the right
-  mode for reporting on the data plane's own flow definition. On real
-  data this mode *does* merge rows that CICFlowMeter had kept separate:
-  checked on CICIDS2017 Wednesday (a DoS day), 5.4% of the resulting
-  merge-groups — 32.7% of all rows — combined more than one ground-truth
-  label under one 5-tuple.
-- `KeyMode.EVAL` (5-tuple + source CSV row index) forces one row to map
-  to exactly one simulated flow, guaranteeing an unambiguous label per
-  flow. This is the default for anything that reports label-derived
-  numbers (escalation rate, recall, the fitting/sweep pipeline). It
-  removes the ambiguity by construction, not by resolving it — a real
-  deployment reading real packets has no "row index" to key on, so this
-  mode is specific to replaying pre-aggregated CSV ground truth and
-  doesn't generalize to the PCAP path.
-
-Every synthesized `Packet` carries `source_row_id` regardless of mode,
-and `FlowState.source_row_ids` accumulates all of them, so even a
-fidelity-mode flow that merged several rows can be traced back to
-exactly which ones.
-
-Keying alone isn't quite enough for an exact 1:1 guarantee in EVAL mode:
-some rows have a long real duration but very few packets, and this
-adapter's even-spaced packet synthesis can reproduce that as a synthetic
-inter-packet gap longer than the idle timeout even though it's one
-continuous CICFlowMeter-recorded flow — idle timeout would then split it
-regardless of the key. `KeyMode.EVAL` therefore also disables idle/active
-timeout enforcement outright (capacity eviction still applies). Confirmed
-on the real Monday file: 529,918 rows -> exactly 529,918 flows, 0 idle
-timeouts, 0 active timeouts. The cost: with timeout-based cleanup gone,
-capacity eviction becomes the only way a flow leaves the table short of
-a FIN/RST, and it now fires far more often — 464,310 times at the
-default 65,536 capacity on that same run. EVAL mode's eviction count is
-not a realistic resource-pressure estimate either; it's the price of the
-label-accuracy guarantee, not a data-plane finding.
-
-**The CSV adapter's packet synthesis is necessarily lossy.** CICIDS2017's
-TrafficLabelling CSVs are CICFlowMeter's finished, aggregated flow
-records, not packet captures — there is no way to recover the true
-per-packet sequence from packet-count/byte-sum/min/max/flag-count
-summaries. See the module docstring in `adapters/csv_flow_adapter.py`
-for the specific approximations (packet-length reconstruction, even
-timestamp spacing instead of real IAT distribution, flag placement by
-count only) and what each one costs. The practical consequence: the
-selector's every-8-packets check cadence cannot be honestly validated
-against CSV-derived data — that needs a real PCAP.
-
-**CICIDS2017's own Timestamp column resolution varies by day.** Monday
-has second resolution; Tuesday–Friday only have minute resolution (no
-seconds field at all). `Packet.timestamp_resolution_us` /
-`FlowState.timestamp_resolution_us` carry this through, and
-`selector.py` flags IAT/duration/rate features `low_confidence=True`
-when a flow's coarsest contributing packet is coarser than 1 second —
-this rides through to `TriggerReason.low_confidence` so the agent
-pipeline sees it too, and must be respected by `fitting.py` (excluded
-or weighted, not silently trusted as exact).
-
-**Distinct-port/distinct-IP counts are HyperLogLog estimates, not exact
-counts.** Default precision (256 registers) gives ~6.5% standard error.
-Fine for telling a scanner touching 30 ports from a benign host touching
-3; not exact, and reported as such via `SrcTable.sketch_standard_error`.
-
-**The flow table's and source table's LRU eviction is a simulation
-convenience, not hardware-accurate.** Both use touch-recency order to
-decide what to evict under capacity pressure. Real P4 register arrays
-have no such concept — they evict on hash collision, which would change
-*which* entry gets evicted (and plausibly the eviction rate) versus what
-this simulator reports. See the hardware-fidelity notes in
-`flow_table.py` and `src_table.py`.
-
-**The source table's capacity is independent of the flow table's, on
-purpose.** A naive "one source table slot per flow table slot" sizing
-(65,536) would cost roughly 203MB of register state at the default HLL
-precision — more than a P4 pipeline stage's on-chip SRAM budget in
-practice. The default of 8,192 concurrently-tracked sources (~25MB)
-reflects that sources are hosts, not flows, and need a much smaller
-independent budget.
-
-**CSV-adapter-driven runs don't reproduce realistic flow concurrency.**
-Rows are fed to the table in file order, each row's synthesized packets
-run to completion before the next row starts. This preserves realistic
-*ordering* (CICIDS2017 rows are close to chronological) but not
-realistic *concurrency* — flows that really overlapped in time aren't
-interleaved in the packet stream, which understates how many flows are
-open at once and therefore understates capacity-eviction pressure at
-realistic table sizes. Eviction *mechanism* correctness is still
-demonstrated separately with an artificially small capacity; the
-eviction *rate* measured this way should not be quoted as realistic.
+- 45 blind records (30 attack, 15 benign), deliberately attack-weighted. This measures discrimination, not deployment rates.
+- One model family and one prompt lineage were tested.
+- Priority 1 is supervised and has no zero-day property. Priority 2 carries the zero-day claim; Priority 3 guarantees nothing.
