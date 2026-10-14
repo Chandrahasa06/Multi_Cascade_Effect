@@ -1,0 +1,38 @@
+{
+  "api_base": "https://openrouter.ai/api/v1",
+  "shakedown_model": "anthropic/claude-haiku-5.5",
+  "sequence": [
+    "anthropic/claude-haiku-5.5",
+    "deepseek/deepseek-v4.1-flash",
+    "z-ai/glm-5.2",
+    "google/gemini-3.5-flash-lite",
+    "moonshotai/kimi-k2.6"
+  ],
+  "models": {
+    "anthropic/claude-haiku-5.5": {
+      "provider": "anthropic",
+      "temperature": null,
+      "max_tokens": 16000
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "provider": "deepinfra/fp8",
+      "temperature": null,
+      "max_tokens": 16000
+    },
+    "z-ai/glm-5.2": {
+      "provider": "streamlake/fp8",
+      "temperature": null,
+      "max_tokens": 16000
+    },
+    "google/gemini-3.5-flash-lite": {
+      "provider": "google-ai-studio",
+      "temperature": null,
+      "max_tokens": 16000
+    },
+    "moonshotai/kimi-k2.6": {
+      "provider": "moonshotai/int4",
+      "temperature": null,
+      "max_tokens": 16000
+    }
+  }
+}

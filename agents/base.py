@@ -140,6 +140,11 @@ class SchemaValidationFailed(RuntimeError):
         #: Empty unless call_structured populates it (kept optional here
         #: too, for the same backward-compatibility reason as above).
         self.raw_attempts: List[str] = []
+        #: OpenRouter only: per-attempt provider/model/generation id/cost, so spend on a
+        #: record that never validated is still accounted for.
+        self.calls: List[dict] = []
+        #: every rejected attempt in full (text, validator message, call metadata)
+        self.rejected_attempts: List[dict] = []
 
 
 class _TokenBucket:
@@ -280,6 +285,14 @@ class CallMetadata:
     #: -- lets eval reporting break retries down by *why*, not just count
     #: them. Empty when schema_retries is 0.
     retry_reasons: List[str] = field(default_factory=list)
+    #: OpenRouter calls only (None/empty for Gemini): who served it, what it cost, and one
+    #: generation id per attempt, including attempts rejected by validation.
+    provider: Optional[str] = None
+    served_model: Optional[str] = None
+    generation_ids: List[str] = field(default_factory=list)
+    cost_usd: Optional[float] = None
+    #: rejected attempts in full (text, validator message, call metadata); empty if none
+    rejected_attempts: List[dict] = field(default_factory=list)
 
 
 _client = None
@@ -401,7 +414,7 @@ def call_structured(
     prompt: str,
     response_schema: Type[T],
     model: str = DEFAULT_MODEL,
-    temperature: float = 0.7,
+    temperature: Optional[float] = 0.7,
     run_index: int = 0,
     use_cache: bool = True,
     extra_validate: Optional[Callable[[T], None]] = None,
@@ -425,7 +438,14 @@ def call_structured(
     retried up to ``MAX_SCHEMA_RETRIES`` times; a call that never
     validates raises ``SchemaValidationFailed`` rather than returning a
     best-effort guess.
+
+    A model named in config/openrouter.json goes to ``agents.openrouter`` (native strict
+    JSON schema, pinned provider, per-attempt cost/provider/generation id saved in the
+    cache record); every other model goes to Gemini exactly as before.
     """
+    from agents import openrouter
+
+    via_openrouter = openrouter.is_configured(model)
     key = _cache_key(record_id, agent, prompt_version, model, temperature, run_index, fault_condition)
     path = _cache_path(key)
 
@@ -439,9 +459,14 @@ def call_structured(
             input_tokens=cached.get("input_tokens"),
             output_tokens=cached.get("output_tokens"),
             retry_reasons=cached.get("retry_reasons", []),
+            provider=cached.get("provider"),
+            served_model=cached.get("served_model"),
+            generation_ids=cached.get("generation_ids", []),
+            cost_usd=cached.get("cost_usd"),
+            rejected_attempts=cached.get("rejected_attempts", []),
         )
 
-    client = _get_client()
+    client = None if via_openrouter else _get_client()
     start = time.monotonic()
     working_prompt = prompt
     parsed_obj: Optional[T] = None
@@ -450,11 +475,21 @@ def call_structured(
     retry_reasons: List[str] = []
     raw_attempts: List[str] = []
     input_tokens = output_tokens = None
+    calls: List[dict] = []
+    #: every rejected attempt in full: the model's text, the complete validator message, and its
+    #: call metadata (cost, provider, generation id) -- saved, so a failure can be diagnosed
+    #: from disk without another call.
+    rejected: List[dict] = []
 
     for attempt in range(MAX_SCHEMA_RETRIES):
-        raw_text, input_tokens, output_tokens = _raw_generate(
-            client, model, working_prompt, response_schema, temperature
-        )
+        if via_openrouter:
+            raw_text, call_meta = openrouter.generate(model, working_prompt, response_schema, temperature)
+            calls.append(call_meta)
+            input_tokens, output_tokens = call_meta["input_tokens"], call_meta["output_tokens"]
+        else:
+            raw_text, input_tokens, output_tokens = _raw_generate(
+                client, model, working_prompt, response_schema, temperature
+            )
         raw_attempts.append(raw_text)
         try:
             candidate = response_schema.model_validate_json(raw_text)
@@ -466,15 +501,32 @@ def call_structured(
             last_err = exc
             schema_retries += 1
             retry_reasons.append(str(exc)[:500])
-            working_prompt = (
-                prompt
-                + f"\n\nYour previous response failed validation: {exc}\n"
-                "Return ONLY JSON matching the required schema, with no other text."
-            )
+            rejected.append({"attempt": attempt + 1, "text": raw_text, "reason": str(exc),
+                             "call": calls[-1] if via_openrouter else None})
+            if via_openrouter:  # the format is enforced by the schema; feed back the rule only
+                working_prompt = prompt + f"\n\nYour previous response failed validation: {exc}\n"
+            else:
+                working_prompt = (
+                    prompt
+                    + f"\n\nYour previous response failed validation: {exc}\n"
+                    "Return ONLY JSON matching the required schema, with no other text."
+                )
+
+    or_fields = {}
+    if via_openrouter:
+        costs = [c["cost_usd"] for c in calls]
+        or_fields = {
+            "provider": calls[-1]["provider"], "served_model": calls[-1]["model"],
+            "generation_ids": [c["generation_id"] for c in calls],
+            "cost_usd": None if any(c is None for c in costs) else float(sum(costs)),
+            "calls": calls,
+        }
 
     if parsed_obj is None:
         failure = SchemaValidationFailed(agent, record_id, MAX_SCHEMA_RETRIES, last_err, list(retry_reasons))
         failure.raw_attempts = list(raw_attempts)
+        failure.calls = list(calls)
+        failure.rejected_attempts = list(rejected)
         raise failure
 
     elapsed = time.monotonic() - start
@@ -496,6 +548,8 @@ def call_structured(
                     "temperature": temperature,
                     "run_index": run_index,
                     "fault_condition": fault_condition,
+                    "rejected_attempts": rejected,
+                    **or_fields,
                 }
             )
         )
@@ -506,4 +560,9 @@ def call_structured(
         elapsed_s=elapsed,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        provider=or_fields.get("provider"),
+        served_model=or_fields.get("served_model"),
+        generation_ids=or_fields.get("generation_ids", []),
+        cost_usd=or_fields.get("cost_usd"),
+        rejected_attempts=rejected,
     )

@@ -6,3 +6,6 @@ results/
 .env
 STATUS.md
 cicids-2017_p0.pkl
+
+# unstripped eval20 input: still carries priority and the rule class prediction
+results/eval20_input.jsonl

@@ -329,3 +329,193 @@ class TwoSidedA5Response(BaseModel):
     credited_hypothesis_id: Optional[str] = None
     cited_claim_ids: List[str]
     rationale: str
+
+
+class PriorsFeatureValue(BaseModel):
+    """Priors run only: a measured value a claim rests on. No relation field, so the
+    *_typical relations (which this run forbids) cannot be produced."""
+
+    name: str
+    value: float
+
+
+class PriorsClaim(BaseModel):
+    claim_id: str
+    statement: str
+    referenced_features: List[PriorsFeatureValue] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class PriorsClaimsResponse(BaseModel):
+    claims: List[PriorsClaim]
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+
+
+class PriorsHypothesisResponse(BaseModel):
+    claims: List[PriorsClaim]
+    hypotheses: List[Hypothesis]
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+
+
+# ---------------------------------------------------------------- priors v3: forced citation
+class ConditionAnswer(str, Enum):
+    YES = "yes"
+    NO = "no"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ConditionValue(BaseModel):
+    name: str
+    value: float
+
+
+class ConditionCheck(BaseModel):
+    """One row of A5's mandatory checklist: a condition id, whether it holds, and the measured
+    value(s) read to decide. A row without a value is rejected by the schema."""
+
+    condition_id: str
+    holds: ConditionAnswer
+    observed: List[ConditionValue] = Field(min_length=1)
+
+
+class V3Claim(BaseModel):
+    claim_id: str
+    statement: str
+    condition_ids: List[str] = Field(default_factory=list)
+    referenced_features: List[PriorsFeatureValue] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class V3Hypothesis(Hypothesis):
+    condition_ids: List[str] = Field(default_factory=list)
+
+
+class V3ClaimsResponse(BaseModel):
+    claims: List[V3Claim]
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+
+
+class V3HypothesisResponse(BaseModel):
+    claims: List[V3Claim]
+    hypotheses: List[V3Hypothesis]
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+
+
+class V3A5Response(BaseModel):
+    """A5 for priors v3: a verdict is not valid without the full condition checklist."""
+
+    checklist: List[ConditionCheck] = Field(min_length=1)
+    benign_plausibility: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_support: float = Field(ge=0.0, le=1.0)
+    verification: float = Field(ge=0.0, le=1.0)
+    credited_hypothesis_id: Optional[str] = None
+    cited_claim_ids: List[str]
+    rationale: str
+
+
+# ---------------------------------------------------------------- self-check run (A1-A5b)
+class CitedValue(BaseModel):
+    name: str
+    value: float
+
+
+class SCClaim(BaseModel):
+    claim_id: str
+    statement: str
+    cited: List[CitedValue] = Field(min_length=1)
+    condition_ids: List[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class AbsenceKind(str, Enum):
+    NO_PAYLOAD_SENT = "no_payload_sent"
+    NO_REPLY = "no_reply"
+    NO_TEARDOWN = "no_teardown"
+    NO_SIZE_VARIATION = "no_size_variation"
+
+
+class TriAnswer(str, Enum):
+    YES = "yes"
+    NO = "no"
+    CANNOT_TELL = "cannot_tell"
+
+
+class Absence(BaseModel):
+    absence: AbsenceKind
+    holds: TriAnswer
+    cited: List[CitedValue] = Field(default_factory=list)
+
+
+class PredOp(str, Enum):
+    EQ = "eq"
+    LT = "lt"
+    LE = "le"
+    GT = "gt"
+    GE = "ge"
+
+
+class FieldPrediction(BaseModel):
+    field: str
+    op: PredOp
+    value: float
+
+
+class SCHypothesis(BaseModel):
+    hypothesis_id: str
+    description: str
+    benign: bool
+    predictions: List[FieldPrediction] = Field(min_length=2)
+    condition_ids: List[str] = Field(default_factory=list)
+
+
+class SCClaimsResponse(BaseModel):
+    claims: List[SCClaim]
+
+
+class SCBehaviourResponse(BaseModel):
+    claims: List[SCClaim]
+    absences: List[Absence]
+
+
+class SCHypothesisResponse(BaseModel):
+    claims: List[SCClaim] = Field(default_factory=list)
+    hypotheses: List[SCHypothesis]
+
+
+class SCBlindResponse(BaseModel):
+    claims: List[SCClaim]
+    absences: List[Absence]
+    hypotheses: List[SCHypothesis]
+
+
+class SCChecklistResponse(BaseModel):
+    checklist: List[ConditionCheck] = Field(min_length=1)
+
+
+class SCVerdictLabel(str, Enum):
+    CONSISTENT_WITH_BENIGN = "consistent_with_benign"
+    ANOMALOUS_BUT_EXPLICABLE = "anomalous_but_explicable"
+    ANOMALOUS_AND_UNEXPLAINED = "anomalous_and_unexplained"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class ConditionDisposition(BaseModel):
+    condition_id: str
+    refuted: bool
+    refuted_by: List[str] = Field(default_factory=list)
+    reason: str
+
+
+class SCVerdictResponse(BaseModel):
+    dispositions: List[ConditionDisposition] = Field(default_factory=list)
+    verdict: SCVerdictLabel
+    rationale: str

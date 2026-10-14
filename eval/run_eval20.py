@@ -1,0 +1,72 @@
+"""eval20 run for one OpenRouter model. Rules fixed in results/eval20_prereg.md before any run.
+
+The model must be named in config/openrouter.json; it is verified live (slug, pinned provider,
+structured-output support) before any call. Input is the label-free
+results/eval20_input_blind.jsonl only. Everything a run writes is namespaced by model, the A1-A4
+upstream cache included, so one model's chain is never replayed for another.
+
+Run: python -m eval.run_eval20 --model <slug from config> [--limit N] [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from agents import evidence_signals as es
+from agents import openrouter
+from agents import reference_arms as ra
+from agents import selfcheck_pipeline as sp
+from agents.prompts import selfcheck_prompts_v3 as PROMPTS
+from eval import run_selfcheck as rs
+from eval.build_blind_input import load_blind_file, verify_blind_file
+from eval.record_protocols import protocols_for
+from eval.run_priors import known_counts
+
+BLIND = Path("results/eval20_input_blind.jsonl")
+PROTOCOLS = Path("results/eval20_protocols.json")
+RUNS = Path("results/eval20_runs")
+
+
+def run_dir(model: str) -> Path:
+    return RUNS / model.replace("/", "__").replace(":", "_")
+
+
+def load_protocols(blinds) -> dict:
+    if not PROTOCOLS.exists():
+        PROTOCOLS.write_text(json.dumps(protocols_for(blinds), indent=2), encoding="utf-8")
+    protocols = json.loads(PROTOCOLS.read_text(encoding="utf-8"))
+    missing = [b["record_id"] for b in blinds if not protocols.get(b["record_id"], {}).get("protocol")]
+    assert not missing, f"protocol not recovered for {missing}"
+    return protocols
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--limit", type=int)
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args()
+    if not openrouter.is_configured(args.model):
+        raise SystemExit(f"{args.model!r} is not in {openrouter.CONFIG_PATH}")
+    pinned = openrouter.verify(args.model)
+    print(f"verified: {pinned['model']} via {pinned['provider_tag']} ({pinned['endpoint_name']})")
+
+    blinds = load_blind_file(BLIND)
+    verify_blind_file(blinds)
+    if args.limit:
+        blinds = blinds[: args.limit]
+    protocols = load_protocols(load_blind_file(BLIND))
+    keys = list(blinds[0]["features"].keys())
+    pool = es.load_pool_slim(extra_columns=list(ra.EXTRA_POOL_COLUMNS) + keys)
+    match_cols = [c for c in keys if c in pool.columns]
+
+    sp.configure(args.model, PROMPTS)
+    d = run_dir(args.model)
+    return rs.run(blinds, out=d / "records.jsonl", tally_path=d / "tally.json", upstream=d / "upstream",
+                  prompt_dir=d / "prompts", protocols=protocols, pool=pool, match_cols=match_cols,
+                  counts=known_counts(), dry=args.dry_run, prompts=PROMPTS)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
