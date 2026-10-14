@@ -2,6 +2,9 @@
   "seed": 20261014,
   "source": "results/escalated_flows.csv",
   "excluded_prior_input_flows": 50,
+  "benign_protocol_filter": "TCP",
+  "benign_tcp_pool_size": 1286,
+  "benign_shortfall": 0,
   "day_distribution": {
     "attack": {
       "friday_ddos": 2,
@@ -10,123 +13,43 @@
       "wednesday": 3
     },
     "benign": {
-      "friday_ddos": 2,
+      "friday_ddos": 1,
       "friday_morning": 1,
       "friday_portscan": 1,
       "monday": 2,
       "thursday_infiltration": 1,
       "thursday_webattacks": 1,
       "tuesday": 1,
-      "wednesday": 1
+      "wednesday": 2
     }
   },
   "records": [
     {
-      "record_id": "64b81fc06294cdb183b9c2596afaad29",
-      "flow_id": "friday_ddos::106248::172.16.0.1-192.168.10.50-51175-80-6",
-      "day": "friday_ddos",
-      "protocol": "TCP",
-      "true_label": "DDoS",
-      "is_attack": true
-    },
-    {
-      "record_id": "36deb47239d6857a1ad012eadad4e9fa",
-      "flow_id": "wednesday::201387::172.16.0.1-192.168.10.50-35454-80-6",
-      "day": "wednesday",
-      "protocol": "TCP",
-      "true_label": "DoS Hulk",
-      "is_attack": true
-    },
-    {
-      "record_id": "b280a172da3d4dcbc7f63d5bde842d94",
-      "flow_id": "friday_morning::113098::192.168.10.15-205.174.165.73-52928-8080-6",
-      "day": "friday_morning",
-      "protocol": "TCP",
-      "true_label": "Bot",
-      "is_attack": true
-    },
-    {
-      "record_id": "2352f4608dd573ee75f81ff8f8c2fb90",
-      "flow_id": "thursday_infiltration::89761::172.217.10.74-192.168.10.14-443-65273-6",
-      "day": "thursday_infiltration",
-      "protocol": "TCP",
-      "true_label": "BENIGN",
-      "is_attack": false
-    },
-    {
-      "record_id": "04e79bafa1a0747b1339345d2496898c",
-      "flow_id": "tuesday::310786::192.168.10.3-192.168.10.9-53-54353-17",
-      "day": "tuesday",
-      "protocol": "UDP",
-      "true_label": "BENIGN",
-      "is_attack": false
-    },
-    {
-      "record_id": "ba4fb24a073d02fba5b415ac35c17912",
-      "flow_id": "wednesday::243629::172.16.0.1-192.168.10.50-38252-80-6",
-      "day": "wednesday",
-      "protocol": "TCP",
-      "true_label": "DoS Hulk",
-      "is_attack": true
-    },
-    {
-      "record_id": "243cdb096286ce19bb71f33acd3b9fc8",
-      "flow_id": "friday_portscan::200302::172.16.0.1-192.168.10.50-50220-666-6",
-      "day": "friday_portscan",
-      "protocol": "TCP",
-      "true_label": "PortScan",
-      "is_attack": true
-    },
-    {
-      "record_id": "47c7cf6f2e50b80abcc64fdf12e5742e",
-      "flow_id": "friday_morning::189579::192.168.10.14-205.174.165.73-53116-8080-6",
-      "day": "friday_morning",
-      "protocol": "TCP",
-      "true_label": "Bot",
-      "is_attack": true
-    },
-    {
-      "record_id": "9d1517d9aadec2b99e350f7fc3b8a669",
-      "flow_id": "friday_ddos::87033::172.16.0.1-192.168.10.50-23871-80-6",
+      "record_id": "660df9dca68751cbd41e1342f683af1a",
+      "flow_id": "friday_ddos::155272::192.168.10.12-61.251.165.12-38674-80-6",
       "day": "friday_ddos",
       "protocol": "TCP",
       "true_label": "BENIGN",
       "is_attack": false
     },
     {
-      "record_id": "56874598f4f2ec83ac95c34d70a5cbde",
-      "flow_id": "friday_portscan::202283::172.16.0.1-192.168.10.50-59428-1755-6",
-      "day": "friday_portscan",
-      "protocol": "TCP",
-      "true_label": "PortScan",
-      "is_attack": true
-    },
-    {
-      "record_id": "f32769c98cf447f49429315c3507e25e",
-      "flow_id": "friday_morning::75881::192.168.10.3-192.168.10.5-53-52320-17",
-      "day": "friday_morning",
-      "protocol": "UDP",
-      "true_label": "BENIGN",
-      "is_attack": false
-    },
-    {
-      "record_id": "44726d210dc4351506deddd6f92a19f0",
-      "flow_id": "thursday_webattacks::22871::192.168.10.3-192.168.10.17-53-55036-17",
-      "day": "thursday_webattacks",
-      "protocol": "UDP",
-      "true_label": "BENIGN",
-      "is_attack": false
-    },
-    {
-      "record_id": "fc08fae8cfce7ecab2c41e397a64c9c2",
-      "flow_id": "monday::16116::129.146.12.96-192.168.10.25-80-49449-6",
-      "day": "monday",
+      "record_id": "e38de4e2b3a992e7e42fed40b290a5bc",
+      "flow_id": "wednesday::487169::148.251.185.11-192.168.10.17-80-49111-6",
+      "day": "wednesday",
       "protocol": "TCP",
       "true_label": "BENIGN",
       "is_attack": false
     },
     {
-      "record_id": "29bbbac17e0a69895ca0847752c987c0",
+      "record_id": "3838a9e55fd695ec83528bfec70e7f2b",
+      "flow_id": "wednesday::484272::172.217.12.166-192.168.10.17-443-41476-6",
+      "day": "wednesday",
+      "protocol": "TCP",
+      "true_label": "BENIGN",
+      "is_attack": false
+    },
+    {
+      "record_id": "8d754291d1f718ec3b84a794b58c9ea9",
       "flow_id": "friday_portscan::186918::172.16.0.1-192.168.10.50-45578-8651-6",
       "day": "friday_portscan",
       "protocol": "TCP",
@@ -134,7 +57,15 @@
       "is_attack": true
     },
     {
-      "record_id": "c130ed08ae415aa5006b10d942a079a6",
+      "record_id": "29e74848e770a9600f3e40e9c2e01e1a",
+      "flow_id": "monday::70734::172.217.12.130-192.168.10.25-443-52170-6",
+      "day": "monday",
+      "protocol": "TCP",
+      "true_label": "BENIGN",
+      "is_attack": false
+    },
+    {
+      "record_id": "b6674235e05b502218dd882b64981ec0",
       "flow_id": "wednesday::134713::172.16.0.1-192.168.10.50-55416-80-6",
       "day": "wednesday",
       "protocol": "TCP",
@@ -142,23 +73,95 @@
       "is_attack": true
     },
     {
-      "record_id": "8925531d4d668448d9475d80a09c3e09",
-      "flow_id": "friday_portscan::21567::157.240.18.35-192.168.10.19-80-45580-6",
+      "record_id": "1b31d1db0f1f50803b5858b508d31136",
+      "flow_id": "wednesday::243629::172.16.0.1-192.168.10.50-38252-80-6",
+      "day": "wednesday",
+      "protocol": "TCP",
+      "true_label": "DoS Hulk",
+      "is_attack": true
+    },
+    {
+      "record_id": "4bc5b10499425bad6a760a1741afeb51",
+      "flow_id": "friday_portscan::202283::172.16.0.1-192.168.10.50-59428-1755-6",
+      "day": "friday_portscan",
+      "protocol": "TCP",
+      "true_label": "PortScan",
+      "is_attack": true
+    },
+    {
+      "record_id": "68ca65e3f2586210675211cbbc98d0a7",
+      "flow_id": "wednesday::201387::172.16.0.1-192.168.10.50-35454-80-6",
+      "day": "wednesday",
+      "protocol": "TCP",
+      "true_label": "DoS Hulk",
+      "is_attack": true
+    },
+    {
+      "record_id": "6512c54a359d8c80ac4cfe5ebc76c612",
+      "flow_id": "thursday_webattacks::70241::192.168.10.16-23.60.139.27-48064-80-6",
+      "day": "thursday_webattacks",
+      "protocol": "TCP",
+      "true_label": "BENIGN",
+      "is_attack": false
+    },
+    {
+      "record_id": "6b64cb6d77175377789c6cea8e664997",
+      "flow_id": "friday_portscan::68649::184.73.196.217-192.168.10.14-443-56656-6",
       "day": "friday_portscan",
       "protocol": "TCP",
       "true_label": "BENIGN",
       "is_attack": false
     },
     {
-      "record_id": "7c54935584fe3f48db7c71f80a60eecc",
-      "flow_id": "wednesday::616352::192.168.10.3-192.168.10.17-53-30385-17",
-      "day": "wednesday",
-      "protocol": "UDP",
+      "record_id": "9e695de9ad6fc7b45d3c691f65d744b0",
+      "flow_id": "friday_morning::38115::173.241.242.220-192.168.10.12-443-54154-6",
+      "day": "friday_morning",
+      "protocol": "TCP",
       "true_label": "BENIGN",
       "is_attack": false
     },
     {
-      "record_id": "f320addd7d086b957d7f74ee6b592b09",
+      "record_id": "d88575c953dda50c69866f8310db172c",
+      "flow_id": "friday_morning::113098::192.168.10.15-205.174.165.73-52928-8080-6",
+      "day": "friday_morning",
+      "protocol": "TCP",
+      "true_label": "Bot",
+      "is_attack": true
+    },
+    {
+      "record_id": "e7c2dd67dd3162838905c98ea468b1b3",
+      "flow_id": "friday_morning::189579::192.168.10.14-205.174.165.73-53116-8080-6",
+      "day": "friday_morning",
+      "protocol": "TCP",
+      "true_label": "Bot",
+      "is_attack": true
+    },
+    {
+      "record_id": "b7dc34455d872e8a5dde212a811972fa",
+      "flow_id": "monday::16116::129.146.12.96-192.168.10.25-80-49449-6",
+      "day": "monday",
+      "protocol": "TCP",
+      "true_label": "BENIGN",
+      "is_attack": false
+    },
+    {
+      "record_id": "35c2e72fb217b3916ccf1c978e82e961",
+      "flow_id": "thursday_infiltration::233466::178.255.83.1-192.168.10.15-80-60364-6",
+      "day": "thursday_infiltration",
+      "protocol": "TCP",
+      "true_label": "BENIGN",
+      "is_attack": false
+    },
+    {
+      "record_id": "71d1541d49d4255d872b77906f9f8480",
+      "flow_id": "friday_ddos::106248::172.16.0.1-192.168.10.50-51175-80-6",
+      "day": "friday_ddos",
+      "protocol": "TCP",
+      "true_label": "DDoS",
+      "is_attack": true
+    },
+    {
+      "record_id": "3c71d97bb554380aae62831ac11c795a",
       "flow_id": "friday_ddos::153889::172.16.0.1-192.168.10.50-35892-80-6",
       "day": "friday_ddos",
       "protocol": "TCP",
@@ -166,20 +169,20 @@
       "is_attack": true
     },
     {
-      "record_id": "aa29e94ee8be226ff3794a22ea12df37",
-      "flow_id": "monday::416922::192.168.10.51-104.19.195.102-41640-80-6",
-      "day": "monday",
+      "record_id": "1af48d78fa7787e01745fcf2544f7a42",
+      "flow_id": "tuesday::37931::185.83.114.100-192.168.10.9-443-2733-6",
+      "day": "tuesday",
       "protocol": "TCP",
       "true_label": "BENIGN",
       "is_attack": false
     },
     {
-      "record_id": "81cb7da747a1d2d097e438413d0c3350",
-      "flow_id": "friday_ddos::175014::192.168.10.3-192.168.10.17-53-61095-17",
-      "day": "friday_ddos",
-      "protocol": "UDP",
-      "true_label": "BENIGN",
-      "is_attack": false
+      "record_id": "b35c4a9248460c6398848506a3ad3b24",
+      "flow_id": "friday_portscan::200302::172.16.0.1-192.168.10.50-50220-666-6",
+      "day": "friday_portscan",
+      "protocol": "TCP",
+      "true_label": "PortScan",
+      "is_attack": true
     }
   ]
 }

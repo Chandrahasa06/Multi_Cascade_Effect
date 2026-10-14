@@ -5,10 +5,14 @@ input (batches 20 / 20b / 10c) are excluded by matching their INPUT feature vect
 (results/agent_input_*.jsonl, what the agents were shown) against this pool's raw rows,
 never by reading any run, score or key file.
 
+Benign candidates are TCP-only (redraw, see results/eval20_prereg.md): all attacks in the
+pool are TCP, so a mixed-protocol benign group would let "UDP is fine" score J = 0.50.
+
 Draw, per group (attack / benign) independently, one seeded generator:
   1. eligible capture days = days with >= 1 unused row of that group, sorted by name
   2. rows within each day shuffled; day order shuffled
   3. round-robin over that day order, one row per day per pass, until 10 are taken
+     (or the group's pool runs out -- the shortfall is recorded, not padded)
 So every eligible capture day is represented before any day gets a second record.
 
 Writes results/eval20_records.json -- the KEY file (record_id, flow_id, day, protocol,
@@ -33,6 +37,12 @@ OUT = Path("results/eval20_records.json")
 PRIOR_INPUTS = [Path("results/agent_input_20.jsonl"), Path("results/agent_input_20b.jsonl"),
                 Path("results/agent_input_10c.jsonl")]
 PROTOCOLS = {"6": "TCP", "17": "UDP", "0": "HOPOPT"}
+BENIGN_PROTOCOL = "TCP"
+
+
+def protocol_of(flow_id: str) -> str:
+    proto = flow_id.rsplit("-", 1)[1]
+    return PROTOCOLS.get(proto, proto)
 
 
 def _vec(features: dict) -> tuple:
@@ -63,7 +73,8 @@ def draw_group(rows: pd.DataFrame, rng: np.random.Generator, n: int) -> list:
             if len(picked) < n and queues[d]:
                 picked.append(queues[d].pop(0))
                 progressed = True
-        assert progressed, f"pool exhausted at {len(picked)}/{n}"
+        if not progressed:
+            break  # pool exhausted: take all there are
     return picked
 
 
@@ -77,7 +88,9 @@ def main() -> int:
 
     rng = np.random.default_rng(SEED)
     attack = draw_group(pool[pool["is_attack"]], rng, N_PER_GROUP)
-    benign = draw_group(pool[~pool["is_attack"]], rng, N_PER_GROUP)
+    benign_pool = pool[~pool["is_attack"] & (pool["flow_id"].map(protocol_of) == BENIGN_PROTOCOL)]
+    benign = draw_group(benign_pool, rng, N_PER_GROUP)
+    assert len(attack) == N_PER_GROUP, f"attack shortfall: {len(attack)}/{N_PER_GROUP}"
     chosen = pool.set_index("flow_id").loc[attack + benign]
 
     order = rng.permutation(len(chosen))  # position must not encode the group
@@ -85,16 +98,15 @@ def main() -> int:
     for i in order:
         fid = chosen.index[i]
         row = chosen.iloc[i]
-        proto = fid.rsplit("-", 1)[1]
         records.append({
             "record_id": rng.bytes(16).hex(),
             "flow_id": fid,
             "day": row["day"],
-            "protocol": PROTOCOLS.get(proto, proto),
+            "protocol": protocol_of(fid),
             "true_label": row["true_label"],
             "is_attack": bool(row["is_attack"]),
         })
-    assert len({r["record_id"] for r in records}) == 20
+    assert len({r["record_id"] for r in records}) == len(records)
 
     attack_days = Counter(r["day"] for r in records if r["is_attack"])
     benign_days = Counter(r["day"] for r in records if not r["is_attack"])
@@ -102,11 +114,14 @@ def main() -> int:
         "seed": SEED,
         "source": str(ESCALATED_FLOWS_CSV).replace("\\", "/"),
         "excluded_prior_input_flows": len(used),
+        "benign_protocol_filter": BENIGN_PROTOCOL,
+        "benign_tcp_pool_size": int(len(benign_pool)),
+        "benign_shortfall": N_PER_GROUP - len(benign),
         "day_distribution": {"attack": dict(sorted(attack_days.items())),
                              "benign": dict(sorted(benign_days.items()))},
         "records": records,
     }, indent=2), encoding="utf-8")
-    print(f"wrote {OUT}")
+    print(f"wrote {OUT}; benign TCP pool {len(benign_pool)}, shortfall {N_PER_GROUP - len(benign)}")
     print("attack days:", dict(sorted(attack_days.items())))
     print("benign days:", dict(sorted(benign_days.items())))
     print("protocols:", Counter(r["protocol"] for r in records))
