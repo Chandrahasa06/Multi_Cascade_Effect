@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import Dict, List
 
 from agents import openrouter
-from eval.run_eval20 import LEDGER, run_dir, run_name
+from eval import behaviour_groups as bg
+from eval.build_blind_input import load_blind_file
+from eval.run_eval20 import DATASETS, LEDGER, run_dir, run_name
 from eval.run_selfcheck import failures_path
 
 KEY = Path("results/eval20_records.json")
@@ -108,12 +110,23 @@ def score_model(model: str, key: Dict[str, dict], spend: Dict[str, float], varia
             e["missed"] += 1
             e["missed_no_yes"] += not yes
     n_att, n_ben = len(att), len(ben)
+    # per-behaviour reading: near-duplicate attack records of one class collapse to one behaviour
+    # (eval/behaviour_groups.py). Benign stays per record: benign flows are separate connections
+    # (all distinct vectors, different hosts and days), so they are not collapsed.
+    feats = {b["record_id"]: b["features"] for b in load_blind_file(DATASETS[dataset][0])}
+    # scale over all of the dataset's records (the stated method), keep only the attack groups
+    grps = [g for g in bg.groups(feats, {k: key[k]["true_label"] for k in feats}) if key[g[0]]["is_attack"]]
+    beh = bg.behaviour_score(grps, {k: True for k in att}, {k: v[k] in ATTACK_CALL for k in att})
     fresh_att = [k for k in att if not key[k].get("previously_evaluated")]
     caught_fresh = sum(v[k] in ATTACK_CALL for k in fresh_att)
     return {
         "model": model, "scored": len(recs), "caught": caught, "flagged": flagged, "cleared": cleared,
         "n_attack": n_att, "n_benign": n_ben,
         "J": caught / n_att + cleared / n_ben - 1,
+        "behaviours": beh["behaviours"], "behaviours_caught": beh["caught"], "behaviours_mixed": beh["mixed"],
+        "J_behaviour": beh["caught"] / beh["behaviours"] + cleared / n_ben - 1,
+        "behaviour_groups": {key[g[0]]["true_label"]: [len(x) for x in grps if key[x[0]]["true_label"] == key[g[0]]["true_label"]]
+                             for g in grps},
         "n_attack_fresh": len(fresh_att), "caught_fresh": caught_fresh,
         "J_fresh": (caught_fresh / len(fresh_att) + cleared / n_ben - 1) if fresh_att else None,
         "by_class": by_class,
@@ -155,6 +168,12 @@ def main() -> int:
          "unexplained / explicable / consistent / insufficient | cost | concurrency | median call s, raw | "
          "median call s, excl. retry waits | median record s, raw |",
          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    B = ["", f"Per-behaviour reading (not pre-registered; the honest interpretation). Near-duplicate attack records of "
+             f"one class are one behaviour: features min-max scaled over the dataset's records, Euclidean / sqrt(10), "
+             f"single linkage at {bg.THRESHOLD}; a behaviour is caught if a strict majority of its records are. Benign stays "
+             "per record (separate connections: distinct vectors, hosts, days).", "",
+         "| model | attacks caught (records) | J per record (pre-registered) | behaviours caught | J per behaviour | mixed behaviours |",
+         "|---|---|---|---|---|---|"]
     f = lambda x: "-" if x is None else f"{x:.1f}"
     for r in rows:
         lost = "/".join(str(r["lost"][a]) for a in AGENTS)
@@ -190,6 +209,13 @@ def main() -> int:
         if r["n_attack_fresh"] != r["n_attack"]:
             L += ["", f"Excluding the {r['n_attack'] - r['n_attack_fresh']} previously evaluated attacks: caught "
                       f"{r['caught_fresh']}/{r['n_attack_fresh']}, J {r['J_fresh']:+.3f}."]
+    for r in rows:
+        B.append(f"| `{r['model']}` | {r['caught']}/{r['n_attack']} | {r['J']:+.3f} | {r['behaviours_caught']}/{r['behaviours']} | "
+                 f"{r['J_behaviour']:+.3f} | {r['behaviours_mixed']} |")
+    if rows:
+        B += ["", "Behaviour groups per class (records per group): " +
+              "; ".join(f"{c} {g}" for c, g in sorted(rows[0]["behaviour_groups"].items()))]
+    L += B
     if rows:
         w = winner(rows)
         L += ["", f"**Winner by the pre-registered rule: `{w['model']}`** (J {w['J']:+.2f}, "
