@@ -53,8 +53,13 @@ def assert_stripped(records: list, labels: set) -> None:
 
 
 def main() -> int:
-    key = json.loads(KEY.read_text(encoding="utf-8"))["records"]
-    flows = pd.read_csv(ESCALATED_FLOWS_CSV).set_index("flow_id")
+    return build(KEY, ESCALATED_FLOWS_CSV, INPUT, BLIND)
+
+
+def build(key_path: Path, flows_csv: Path, input_path: Path, blind_path: Path) -> int:
+    """The identical build/strip/verify for any key file and the escalated-flows run it came from."""
+    key = json.loads(key_path.read_text(encoding="utf-8"))["records"]
+    flows = pd.read_csv(flows_csv).set_index("flow_id")
     flow_ids = [k["flow_id"] for k in key]
 
     pool, table = fit_signature_table_for_bins()
@@ -68,16 +73,16 @@ def main() -> int:
         }
         assert_no_ground_truth(rec)
         records.append(rec)
-    write_and_verify_jsonl(records, INPUT)
-    print(f"wrote {INPUT} ({len(records)} records)")
+    write_and_verify_jsonl(records, input_path)
+    print(f"wrote {input_path} ({len(records)} records)")
 
-    write_blind_file([strip_to_blind(r) for r in records], BLIND)
-    reloaded = load_blind_file(BLIND)
+    write_blind_file([strip_to_blind(r) for r in records], blind_path)
+    reloaded = load_blind_file(blind_path)
     verify_blind_file(reloaded)
     all_labels = set(flows["true_label"].unique()) | set(flows["class_predicted"].dropna().unique())
     assert_stripped(reloaded, all_labels)
     assert [r["record_id"] for r in reloaded] == [k["record_id"] for k in key]
-    print(f"wrote {BLIND} ({len(reloaded)} records); verify_blind_file + no label/priority/reason/"
+    print(f"wrote {blind_path} ({len(reloaded)} records); verify_blind_file + no label/priority/reason/"
           "rule-class-prediction checks PASSED")
     return 0
 

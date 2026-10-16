@@ -200,6 +200,16 @@ def verify(model: str) -> dict:
             "quantization": ep.get("quantization")}
 
 
+def key_remaining() -> Optional[float]:
+    """The key's own remaining balance in USD (None if it has no cap). Lags recent spend."""
+    import httpx
+
+    r = httpx.get(f"{load_config()['api_base']}/key", headers={"Authorization": f"Bearer {_api_key()}"}, timeout=30)
+    r.raise_for_status()
+    v = r.json()["data"].get("limit_remaining")
+    return None if v is None else float(v)
+
+
 # ------------------------------------------------------------------ schema
 def strict_schema(model_cls: Type[BaseModel]) -> dict:
     schema = model_cls.model_json_schema()

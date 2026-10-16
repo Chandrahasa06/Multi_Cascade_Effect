@@ -1,0 +1,422 @@
+{
+  "c38594a0f4930ba47c09ca8029abb37c": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 28
+  },
+  "adc0f9e59df615d0c7124af04d0f2a07": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "7a757d5996e7a1ca96d91fa1097f63b0": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "40ff94f99e38996e0cf0836e9af2d9dc": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "a2ca7fbdf7005b29b293c223f009314e": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 2
+  },
+  "1768fa468da3d7bda31787de7a8911b0": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "0e39ca70cd6abd957342b1b2747cdb60": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "4335e0c942b30c6349665b3ad9630921": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "35296a0108da157216275cddfe814d2f": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "7a4642cd611b0c4759356a88c1b5f2b0": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "9a70733015be9968b78fbd72e5e1f0af": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "62ce9b55e3797579aed5229ce4e1ab21": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "e0c1fbf4e41b7931aff44e2934b808ec": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 9329
+  },
+  "fcf0c898578eb167a66ec21a73496c31": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "aa6eaad550a55ce917b83564bf098689": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "3ca790431370f6878bc41bab843f2564": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "b4ddaf215ee5cc57889c48a516d6f534": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "3f3bd25fc50a3fa48b788d1fa6b5a861": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "dd9d88f0430cf6268d1afcd16ad9d2d9": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "36c77ffd1e3ff5f215bbaaf4ac3028bd": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "59cc70d628a15c96452a7cb3ded35239": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 6613
+  },
+  "fcb48086ef89e53f6288604fabfea2c7": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "36ab60a27fdba90c8eb642827d4d7c77": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 9329
+  },
+  "0df130b7010bb2225abe495bc4a675fa": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "74f80504a4ce51c97cc87cbf2801fe30": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "3afae40a6132cbccd53d21ab7af3a267": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "a002997501475895742b80350de235b7": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 4
+  },
+  "4e8262b9c749dde9fa40d7c20477a10e": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "328f2ace15d07c61e41d99cd4cac41dd": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "23a2c3377dab5b05e748d48ae73bf575": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "0a0db8bf71ebb819351f2940c30c29a6": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "5d2c38a5de397669abe0e88ddac4bc55": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 4314
+  },
+  "1eeddd5fcc32252647fc15e396a148d8": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "2e9bbbac7aa79eadf604130bcf47f6b9": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "12991c5abae3ee17245dd16f52918f22": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "acc18d1a660df9dca68751cbd41e1342": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 5846
+  },
+  "f683af1ae38de4e2b3a992e7e42fed40": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "b290a5bc3838a9e55fd695ec83528bfe": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "c70e7f2b8d754291d1f718ec3b84a794": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 2
+  },
+  "b58c9ea929e74848e770a9600f3e40e9": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "c2e01e1ab6674235e05b502218dd882b": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "64981ec01b31d1db0f1f50803b5858b5": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "08d311364bc5b10499425bad6a760a17": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "41afeb5168ca65e3f2586210675211cb": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 28
+  },
+  "bc98d0a76512c54a359d8c80ac4cfe5e": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "bc76c6126b64cb6d77175377789c6cea": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 2547
+  },
+  "8e6649979e695de9ad6fc7b45d3c691f": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "65d744b0d88575c953dda50c69866f83": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "10db172ce7c2dd67dd3162838905c98e": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "a468b1b3b7dc34455d872e8a5dde212a": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "811972fa35c2e72fb217b3916ccf1c97": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 5846
+  },
+  "8e82e96171d1541d49d4255d872b7790": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "6f9f84803c71d97bb554380aae62831a": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "c11c795a1af48d78fa7787e01745fcf2": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "544f7a42b35c4a9248460c6398848506": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 25
+  },
+  "a3ad3b248de3ece33bade883f38046d5": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "662793a1773cfda4d75100088b71ec3c": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "38eedebd4dd83c8d760e894ff51f81b1": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "7511e40769ad5026b527148d677f7205": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "5b3da341eae8082fb0708b046eb03886": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "a81ee87400a0e90130fa58c52be064b6": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 594
+  },
+  "5176ee5455130ac82960cc88bd7581fa": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "eb7c8990316266eabbf59d9480fa7831": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 3
+  },
+  "70c8bb01a6eb48bef20ad6126280c973": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "397edab62335ee11300143268ea08fae": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "0834753c0518eceab46251f1fbe2960a": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 9329
+  },
+  "1e953650e4b5659251fe74ec80b2e905": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "6bee9bc587e46927e4a46b29c71ad8ee": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "5b855cb142ec1a8d072c5cde96fe3d25": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "6d34bd83291f109433cefe512278a790": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 22
+  },
+  "2ba05d4b8527f551651dc2eb662a5c48": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "bcc1357ea6af3564dcc6c2cb52f008ca": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 6613
+  },
+  "bc18979fb57dc18f0f3fb2c7712e5460": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "188e884b9bc0522deb4ff44f65e69980": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "b310737faf20ff2ea208bc0d18133fea": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "ba3615f8dd1b8f7b92a6e0f189b9c7dd": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 6937
+  },
+  "788feff0d387df5fe2d203484ddbe335": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "3ff9152349b688845c6e3dd87040b2fd": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 9329
+  },
+  "9260140cff378bc856e419280f166c2c": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "273f0bdad68c8c328cc5d631207ddfc5": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "21164d771ddf38f9959be95d56b44eb7": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 6814
+  },
+  "2a125ba20411d44d96e3de6cfc1581a4": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "2d87fc63c1e8b4e40ba76937ecf415b6": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 1
+  },
+  "3d13fca8d5d6d9f3134f51a4c662483d": {
+    "protocol": "TCP",
+    "status": "unique",
+    "matches": 2
+  }
+}

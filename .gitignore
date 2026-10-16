@@ -9,3 +9,5 @@ cicids-2017_p0.pkl
 
 # unstripped eval20 input: still carries priority and the rule class prediction
 results/eval20_input.jsonl
+# unstripped v3eval input: carries priority and the rule class prediction
+results/v3eval_input.jsonl

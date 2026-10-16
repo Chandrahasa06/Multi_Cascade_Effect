@@ -153,3 +153,35 @@ def test_non_retryable_error_is_not_retried(monkeypatch):
 def test_deepseek_alone_runs_at_three():
     conc = {s: CFG["models"][s].get("max_concurrent", CFG["max_concurrent"]) for s in CFG["sequence"]}
     assert conc == {s: (3 if s == "deepseek/deepseek-v4.1-flash" else 8) for s in CFG["sequence"]}
+
+
+# ---------------------------------------------------------------- v3eval dataset
+def test_v3eval_key_is_not_reachable_from_the_decision_path():
+    from agents import selfcheck_pipeline as sp
+    from agents import holdout as ho
+    from eval import run_eval20
+    src = "".join(inspect.getsource(m) for m in (run_eval20, rs, sp, openrouter, ho))
+    assert "v3eval_records" not in src and "escalated_flows_v3" not in src
+
+
+def test_datasets_never_share_a_run_dir_or_a_ledger_name():
+    from eval import run_eval20 as r
+    m = SLUG
+    assert r.run_dir(m, "holdout3_noquota", "eval20") != r.run_dir(m, "holdout3_noquota", "v3eval")
+    assert r.run_name(m, "holdout3_noquota", "v3eval") == f"v3eval:{m}#holdout3_noquota"
+    assert r.run_name(m, "holdout3_noquota", "eval20") == f"{m}#holdout3_noquota"   # eval20 names unchanged
+    assert r.DATASETS["v3eval"][3] == 1.95
+
+
+def test_preflight_refuses_when_the_key_cannot_cover_the_ceiling(monkeypatch, tmp_path, capsys):
+    import sys
+    from eval import run_eval20 as r
+    monkeypatch.setattr(openrouter, "key_remaining", lambda: 1.80)
+    monkeypatch.setattr(openrouter, "verify", lambda m: {"model": m, "provider_tag": "anthropic", "endpoint_name": "x",
+                                                          "provider_name": "Anthropic", "pricing": {}})
+    monkeypatch.setattr(r, "LEDGER", tmp_path / "l.jsonl")
+    monkeypatch.setattr(r.es, "load_pool_slim", lambda extra_columns=(): __import__("pandas").DataFrame())
+    monkeypatch.setattr(r, "DATASETS", {**r.DATASETS, "v3eval": (*r.DATASETS["v3eval"][:2], tmp_path, 1.95)})
+    monkeypatch.setattr(sys, "argv", ["x", "--model", SLUG, "--variant", "holdout3_noquota", "--dataset", "v3eval"])
+    assert r.main() == 2
+    assert "Raise the key's cap first" in capsys.readouterr().out
