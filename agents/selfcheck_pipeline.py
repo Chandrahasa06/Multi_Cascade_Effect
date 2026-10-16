@@ -152,6 +152,35 @@ def run_a3(rid, flow, a1, a2):
     return _call(rid, "a3", prompt, SCHypothesisResponse, v), prompt
 
 
+def run_a3_holdout(rid, flow_redacted, a1, a2, held, hidden, visible):
+    """A3 with three fields withheld (agents/holdout.py). It sees the redacted row and only the A1/A2
+    claims and absences that neither name nor read a withheld field; asserted, not assumed."""
+    from agents import holdout as ho
+
+    a1c = ho.redact_claims(a1.claims, hidden, visible)
+    a2c = ho.redact_claims(a2.claims, hidden, visible)
+    a2a = ho.redact_absences(a2.absences, hidden)
+    a2_text = P.claims_text(a2c) + "\n" + P.absences_text(a2a)
+    body = P.a3_body(flow_redacted, P.claims_text(a1c), a2_text)
+    leaks = ho.leaked_fields(body, hidden, visible)
+    assert not leaks, f"{rid}: withheld field(s) {leaks} would reach A3"
+    prompt = P.a3(flow_redacted, P.claims_text(a1c), a2_text, held)
+    assert prompt.endswith(body), "A3's record-specific text must be exactly the checked body"
+
+    def v(r):
+        errors = []
+        for check in (lambda: validate_claims(r.claims, "a3_c"), lambda: validate_hypotheses(r.hypotheses, "a3_h"),
+                      lambda: ho.validate_holdout_predictions(r.hypotheses, held)):
+            try:
+                check()
+            except ValueError as exc:
+                errors.append(str(exc))
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    return _call(rid, "a3", prompt, SCHypothesisResponse, v), prompt
+
+
 def run_a4(rid, flow):
     prompt = P.a4(flow)
 

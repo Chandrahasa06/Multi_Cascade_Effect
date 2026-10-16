@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from agents import base, evidence_signals as es, openrouter
+from agents import holdout as ho
 from agents import reference_arms as ra
 from agents import selfcheck_core as core
 from agents import selfcheck_pipeline as sp
@@ -170,7 +171,7 @@ def main() -> int:
 
 def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prompt_dir: Path, protocols: dict,
         pool, match_cols: List[str], counts: Dict[str, set], dry: bool = False, prompts=P,
-        workers: int = 1) -> int:
+        workers: int = 1, holdout: bool = False) -> int:
     """The record loop. `sp` must already be configured for the model and prompt module.
     Returns 0, or 3 if the run was stopped (quota, provider error or a cost ceiling); where it
     stopped is recorded in the tally."""
@@ -203,6 +204,12 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
         builders = template_prompts(flow, prompts)
         for t in builders.values():
             check_prompt(t, t, rcounts, fvals, tmpl_numbers)
+        held = hidden = ()
+        if holdout:
+            held, hidden = ho.held_out(rid), ho.hidden_fields(rid)
+            feats_a3 = ho.redact_features(shown_features(feats), hidden)
+            assert not set(hidden) & set(feats_a3), "withheld fields must not be in A3's row"
+            flow_a3 = prompts.flow_block(feats_a3, proto, tod)
         if dry:
             return ("dry", rid)
         metas = {}
@@ -221,7 +228,11 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
                     f4 = px.submit(sp.run_a4, rid, flow)
                     (a1, metas["a1"]), prompts_used["a1"] = sp.run_a1(rid, flow)
                     (a2, metas["a2"]), prompts_used["a2"] = sp.run_a2(rid, flow, a1)
-                    (a3, metas["a3"]), prompts_used["a3"] = sp.run_a3(rid, flow, a1, a2)
+                    if holdout:
+                        (a3, metas["a3"]), prompts_used["a3"] = sp.run_a3_holdout(
+                            rid, flow_a3, a1, a2, held, hidden, list(feats_a3))
+                    else:
+                        (a3, metas["a3"]), prompts_used["a3"] = sp.run_a3(rid, flow, a1, a2)
                     (a4, metas["a4"]), prompts_used["a4"] = f4.result()
                 for k in ("a1", "a2", "a3", "a4"):
                     check_prompt(prompts_used[k], builders[k], rcounts, fvals, tmpl_numbers)
@@ -240,7 +251,10 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
             status = {}
             status_detail = {}
             for h in [*a3.hypotheses, *a4.hypotheses]:
-                st, det = core.hypothesis_status(h.predictions, row)
+                if holdout and h.hypothesis_id.startswith("a3_"):  # A3 predicted fields it never saw
+                    st, det = ho.holdout_status(h.predictions, row, held)
+                else:
+                    st, det = core.hypothesis_status(h.predictions, row)
                 status[h.hypothesis_id] = st
                 status_detail[h.hypothesis_id] = det
 
@@ -303,6 +317,7 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
             "stage_meta": {**upstream_meta, **{k: stage_meta(m) for k, m in metas.items()}},
             "prompt_versions": dict(prompts.VERSIONS),
             "elapsed_s": time.monotonic() - t0,
+            "held_out": list(held), "hidden_from_a3": list(hidden),
         }
         return ("ok", line, metas, prompts_used, withheld_log)
 

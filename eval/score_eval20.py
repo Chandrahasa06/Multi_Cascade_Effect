@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from agents import openrouter
-from eval.run_eval20 import LEDGER, run_dir
+from eval.run_eval20 import LEDGER, run_dir, run_name
 from eval.run_selfcheck import failures_path
 
 KEY = Path("results/eval20_records.json")
@@ -42,8 +42,19 @@ def _jsonl(p: Path) -> List[dict]:
     return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()] if p.exists() else []
 
 
-def score_model(model: str, key: Dict[str, dict], spend: Dict[str, float]) -> dict:
-    d = run_dir(model)
+def hypothesis_counts(recs) -> dict:
+    """SUPPORTED / CONTRADICTED / UNCHECKABLE per hypothesis source (a3_h..., a4_h...)."""
+    out = {}
+    for r in recs:
+        for hid, st in r["hypothesis_status"].items():
+            src = hid[:2]
+            out.setdefault(src, {"SUPPORTED": 0, "CONTRADICTED": 0, "UNCHECKABLE": 0})
+            out[src][st] += 1
+    return out
+
+
+def score_model(model: str, key: Dict[str, dict], spend: Dict[str, float], variant: str = "") -> dict:
+    d = run_dir(model, variant)
     recs = {r["record_id"]: r for r in _jsonl(d / "records.jsonl")}
     fails = _jsonl(failures_path(d / "records.jsonl"))
     tally = json.loads((d / "tally.json").read_text(encoding="utf-8")) if (d / "tally.json").exists() else {}
@@ -82,7 +93,8 @@ def score_model(model: str, key: Dict[str, dict], spend: Dict[str, float]) -> di
         "J": caught / N_PER_GROUP + cleared / N_PER_GROUP - 1,
         "lost": lost, "lost_total": sum(lost.values()), "not_run": not_run, "verdicts": dist,
         "insufficient_share": insuff / len(key), "inconclusive": insuff / len(key) > 0.30,
-        "cost_usd": spend.get(model, 0.0),
+        "cost_usd": spend.get(run_name(model, variant), 0.0),
+        "hypotheses": hypothesis_counts(recs.values()), "variant": variant,
         "median_call_s": statistics.median(call_lat) if call_lat else None,
         "median_call_excl_retry_s": statistics.median(excl) if excl else None,
         "calls_with_known_retry_wait": len(excl), "calls_timed": len(call_lat),
@@ -100,11 +112,16 @@ def winner(rows: List[dict]) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="*")
+    ap.add_argument("--variant", default="")
     args = ap.parse_args()
+    global REPORT
+    if args.variant:
+        REPORT = Path(f"results/eval20_{args.variant}_report.md")
     key = {r["record_id"]: r for r in json.loads(KEY.read_text(encoding="utf-8"))["records"]}
     _, spend = openrouter.ledger_totals(LEDGER)
     models = args.models or openrouter.load_config()["sequence"]
-    rows = [score_model(m, key, spend) for m in models if (run_dir(m) / "tally.json").exists()]
+    rows = [score_model(m, key, spend, args.variant) for m in models
+            if (run_dir(m, args.variant) / "tally.json").exists()]
     L = ["# eval20 results", "", "Rule: `results/eval20_prereg.md`. Caught = anomalous_and_unexplained on an attack; "
          "cleared = consistent_with_benign or anomalous_but_explicable on a benign flow; insufficient_evidence and "
          "lost records are neither. J = caught/10 + cleared/10 - 1.", "",
@@ -133,6 +150,9 @@ def main() -> int:
             notes.append(f"stopped at {r['stopped_at']['record_id'][:10]}: {r['stopped_at']['reason'][:120]}")
         if r["http_retries_recorded"]:
             notes.append(f"{r['http_retries_recorded']} HTTP retries recorded, {r['retry_wait_s_recorded']:.0f}s of retry waits")
+        hc = "; ".join(f"{src.upper()} hypotheses {h['SUPPORTED']} supported / {h['CONTRADICTED']} struck out / "
+                       f"{h['UNCHECKABLE']} uncheckable" for src, h in sorted(r["hypotheses"].items()))
+        notes.append(hc)
         pc = ", ".join(f"{c} {k}/{n}" for c, (k, n) in sorted(r["per_class"].items()))
         L.append(f"- `{r['model']}` attacks by class: {pc}" + ("; " + "; ".join(notes) if notes else ""))
     if rows:

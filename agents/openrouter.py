@@ -63,23 +63,28 @@ _sem = threading.BoundedSemaphore(1)
 
 
 def ledger_totals(ledger: Path) -> Tuple[float, Dict[str, float]]:
-    total, by_model = 0.0, {}
+    """(total, spend per run). A run is named by its model, or model#variant for a variant run;
+    entries written before runs were named count under their model."""
+    total, by_run = 0.0, {}
     if ledger.exists():
         for line in ledger.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 e = json.loads(line)
+                run = e.get("run") or e["model"]
                 total += e["cost_usd"]
-                by_model[e["model"]] = by_model.get(e["model"], 0.0) + e["cost_usd"]
-    return total, by_model
+                by_run[run] = by_run.get(run, 0.0) + e["cost_usd"]
+    return total, by_run
 
 
-def set_cost_guard(model: str, run_ceiling: float, global_ceiling: float, ledger: Path, max_concurrent: int) -> None:
+def set_cost_guard(model: str, run_ceiling: float, global_ceiling: float, ledger: Path, max_concurrent: int,
+                   run: Optional[str] = None) -> None:
     global _sem
-    total, by_model = ledger_totals(ledger)
+    total, by_run = ledger_totals(ledger)
+    run = run or model
     with _guard_lock:
         _guard.clear()
-        _guard.update(model=model, run_ceiling=float(run_ceiling), global_ceiling=float(global_ceiling),
-                      ledger=Path(ledger), run_spent=by_model.get(model, 0.0), global_spent=total, tripped=None)
+        _guard.update(model=model, run=run, run_ceiling=float(run_ceiling), global_ceiling=float(global_ceiling),
+                      ledger=Path(ledger), run_spent=by_run.get(run, 0.0), global_spent=total, tripped=None)
     _sem = threading.BoundedSemaphore(max_concurrent)
 
 
@@ -95,7 +100,7 @@ def _check_ceiling(model: str) -> None:
         g = _guard
         if g["tripped"] is None:
             if g["run_spent"] >= g["run_ceiling"]:
-                g["tripped"] = f"per-run ceiling ${g['run_ceiling']:.2f} for {g['model']} reached (spent ${g['run_spent']:.4f})"
+                g["tripped"] = f"per-run ceiling ${g['run_ceiling']:.2f} for {g['run']} reached (spent ${g['run_spent']:.4f})"
             elif g["global_spent"] >= g["global_ceiling"]:
                 g["tripped"] = f"global ceiling ${g['global_ceiling']:.2f} reached (spent ${g['global_spent']:.4f})"
         if g["tripped"]:
@@ -114,7 +119,7 @@ def _charge(meta: Dict, pricing: Dict) -> None:
         _guard["run_spent"] += cost
         _guard["global_spent"] += cost
         with open(_guard["ledger"], "a", encoding="utf-8") as f:
-            f.write(json.dumps({"t": time.time(), "model": meta.get("requested_model"),
+            f.write(json.dumps({"t": time.time(), "model": meta.get("requested_model"), "run": _guard["run"],
                                 "generation_id": meta.get("generation_id"), "cost_usd": cost,
                                 "estimated": estimated}) + "\n")
 
