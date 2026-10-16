@@ -1,6 +1,8 @@
 {
   "api_base": "https://openrouter.ai/api/v1",
   "shakedown_model": "anthropic/claude-haiku-5.5",
+  "global_cost_ceiling_usd": 10.0,
+  "max_concurrent": 8,
   "sequence": [
     "anthropic/claude-haiku-5.5",
     "deepseek/deepseek-v4.1-flash",
@@ -12,27 +14,32 @@
     "anthropic/claude-haiku-5.5": {
       "provider": "anthropic",
       "temperature": null,
-      "max_tokens": 16000
+      "max_tokens": 16000,
+      "cost_ceiling_usd": 0.5
     },
     "deepseek/deepseek-v4.1-flash": {
       "provider": "deepinfra/fp8",
       "temperature": null,
-      "max_tokens": 16000
+      "max_tokens": 16000,
+      "cost_ceiling_usd": 0.75
     },
     "z-ai/glm-5.2": {
       "provider": "streamlake/fp8",
       "temperature": null,
-      "max_tokens": 16000
+      "max_tokens": 16000,
+      "cost_ceiling_usd": 2.5
     },
     "google/gemini-3.5-flash-lite": {
       "provider": "google-ai-studio",
       "temperature": null,
-      "max_tokens": 16000
+      "max_tokens": 16000,
+      "cost_ceiling_usd": 2.5
     },
     "moonshotai/kimi-k2.6": {
       "provider": "moonshotai/int4",
       "temperature": null,
-      "max_tokens": 16000
+      "max_tokens": 16000,
+      "cost_ceiling_usd": 4.5
     }
   }
 }

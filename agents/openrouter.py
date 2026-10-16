@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import threading
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -44,6 +45,76 @@ class OpenRouterConfigError(RuntimeError):
 
 class OpenRouterError(RuntimeError):
     pass
+
+
+class CostCeilingExceeded(OpenRouterError):
+    """A runaway guard tripped. Raised before a call would be sent, never after."""
+
+
+# ------------------------------------------------------------------ cost guard
+#: Every priced call is appended to the ledger, so the per-run and global totals survive
+#: across processes (and a resumed run counts what it already spent). Calls in flight when a
+#: ceiling trips still complete, so a stop can overshoot by at most the concurrent calls' cost.
+_guard_lock = threading.Lock()
+_guard: Dict = {}
+_sem = threading.BoundedSemaphore(1)
+
+
+def ledger_totals(ledger: Path) -> Tuple[float, Dict[str, float]]:
+    total, by_model = 0.0, {}
+    if ledger.exists():
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                e = json.loads(line)
+                total += e["cost_usd"]
+                by_model[e["model"]] = by_model.get(e["model"], 0.0) + e["cost_usd"]
+    return total, by_model
+
+
+def set_cost_guard(model: str, run_ceiling: float, global_ceiling: float, ledger: Path, max_concurrent: int) -> None:
+    global _sem
+    total, by_model = ledger_totals(ledger)
+    with _guard_lock:
+        _guard.clear()
+        _guard.update(model=model, run_ceiling=float(run_ceiling), global_ceiling=float(global_ceiling),
+                      ledger=Path(ledger), run_spent=by_model.get(model, 0.0), global_spent=total, tripped=None)
+    _sem = threading.BoundedSemaphore(max_concurrent)
+
+
+def cost_guard_state() -> Dict:
+    with _guard_lock:
+        return dict(_guard)
+
+
+def _check_ceiling(model: str) -> None:
+    with _guard_lock:
+        if not _guard:
+            return
+        g = _guard
+        if g["tripped"] is None:
+            if g["run_spent"] >= g["run_ceiling"]:
+                g["tripped"] = f"per-run ceiling ${g['run_ceiling']:.2f} for {g['model']} reached (spent ${g['run_spent']:.4f})"
+            elif g["global_spent"] >= g["global_ceiling"]:
+                g["tripped"] = f"global ceiling ${g['global_ceiling']:.2f} reached (spent ${g['global_spent']:.4f})"
+        if g["tripped"]:
+            raise CostCeilingExceeded(g["tripped"])
+
+
+def _charge(meta: Dict, pricing: Dict) -> None:
+    cost = meta.get("cost_usd")
+    estimated = cost is None
+    if estimated:  # never let an unpriced call slip past the guard
+        cost = ((meta.get("input_tokens") or 0) * float(pricing.get("prompt", 0))
+                + (meta.get("output_tokens") or 0) * float(pricing.get("completion", 0)))
+    with _guard_lock:
+        if not _guard:
+            return
+        _guard["run_spent"] += cost
+        _guard["global_spent"] += cost
+        with open(_guard["ledger"], "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": time.time(), "model": meta.get("requested_model"),
+                                "generation_id": meta.get("generation_id"), "cost_usd": cost,
+                                "estimated": estimated}) + "\n")
 
 
 # ------------------------------------------------------------------ config
@@ -210,7 +281,11 @@ def generate(model: str, prompt: str, response_schema: Type[BaseModel], temperat
         payload["temperature"] = m["temperature"]
     if m.get("reasoning") is not None:
         payload["reasoning"] = m["reasoning"]
-    body = _post(payload)
+    _check_ceiling(model)
+    t0 = time.monotonic()
+    with _sem:
+        body = _post(payload)
+    latency = time.monotonic() - t0
     choice = body["choices"][0]
     usage = body.get("usage") or {}
     cost = usage.get("cost")
@@ -226,7 +301,9 @@ def generate(model: str, prompt: str, response_schema: Type[BaseModel], temperat
         "input_tokens": usage.get("prompt_tokens"),
         "output_tokens": usage.get("completion_tokens"),
         "finish_reason": choice.get("finish_reason"),
+        "latency_s": latency,
     }
+    _charge(meta, pinned.get("pricing", {}))
     if pinned["provider_name"] and meta["provider"] != pinned["provider_name"]:
         raise OpenRouterError(f"{model}: served by {meta['provider']!r}, pinned {pinned['provider_name']!r}")
     return choice["message"].get("content") or "", meta

@@ -26,6 +26,7 @@ from eval.run_priors import known_counts
 BLIND = Path("results/eval20_input_blind.jsonl")
 PROTOCOLS = Path("results/eval20_protocols.json")
 RUNS = Path("results/eval20_runs")
+LEDGER = RUNS / "_spend_ledger.jsonl"
 
 
 def run_dir(model: str) -> Path:
@@ -63,9 +64,19 @@ def main() -> int:
 
     sp.configure(args.model, PROMPTS)
     d = run_dir(args.model)
+    d.mkdir(parents=True, exist_ok=True)
+    cfg = openrouter.load_config()
+    m = openrouter.model_config(args.model)
+    if "cost_ceiling_usd" not in m or "global_cost_ceiling_usd" not in cfg:
+        raise SystemExit(f"{args.model}: no cost ceiling in {openrouter.CONFIG_PATH}; refusing to run unguarded")
+    openrouter.set_cost_guard(args.model, m["cost_ceiling_usd"], cfg["global_cost_ceiling_usd"], LEDGER,
+                              cfg.get("max_concurrent", 1))
+    g = openrouter.cost_guard_state()
+    print(f"cost guard: run ${g['run_spent']:.4f} of ${g['run_ceiling']:.2f}, "
+          f"global ${g['global_spent']:.4f} of ${g['global_ceiling']:.2f}; concurrency {cfg.get('max_concurrent', 1)}")
     return rs.run(blinds, out=d / "records.jsonl", tally_path=d / "tally.json", upstream=d / "upstream",
                   prompt_dir=d / "prompts", protocols=protocols, pool=pool, match_cols=match_cols,
-                  counts=known_counts(), dry=args.dry_run, prompts=PROMPTS)
+                  counts=known_counts(), dry=args.dry_run, prompts=PROMPTS, workers=cfg.get("max_concurrent", 1))
 
 
 if __name__ == "__main__":

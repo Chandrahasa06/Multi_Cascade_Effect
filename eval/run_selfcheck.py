@@ -12,6 +12,8 @@ import concurrent.futures
 import datetime as dt
 import json
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -93,7 +95,7 @@ def agent_trust(name: str, out, row: Dict[str, float], a4_pairs, protocol: Optio
 def stage_meta(m) -> dict:
     return {"cached": bool(m.cached), "schema_retries": int(m.schema_retries), "retry_reasons": list(m.retry_reasons),
             "provider": m.provider, "served_model": m.served_model, "generation_ids": list(m.generation_ids),
-            "cost_usd": m.cost_usd, "rejected_attempts": list(m.rejected_attempts)}
+            "cost_usd": m.cost_usd, "elapsed_s": m.elapsed_s, "rejected_attempts": list(m.rejected_attempts)}
 
 
 def failures_path(out: Path) -> Path:
@@ -166,8 +168,11 @@ def main() -> int:
 
 
 def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prompt_dir: Path, protocols: dict,
-        pool, match_cols: List[str], counts: Dict[str, set], dry: bool = False, prompts=P) -> int:
-    """The record loop. `sp` must already be configured for the model and prompt module."""
+        pool, match_cols: List[str], counts: Dict[str, set], dry: bool = False, prompts=P,
+        workers: int = 1) -> int:
+    """The record loop. `sp` must already be configured for the model and prompt module.
+    Returns 0, or 3 if the run was stopped (quota, provider error or a cost ceiling); where it
+    stopped is recorded in the tally."""
     upstream.mkdir(parents=True, exist_ok=True)
     prompt_dir.mkdir(parents=True, exist_ok=True)
     done = {json.loads(l)["record_id"] for l in open(out, encoding="utf-8") if l.strip()} if out.exists() else set()
@@ -177,8 +182,15 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
              "schema_retries": 0, "cost_usd": 0.0, "failed": [], "stopped_on_quota": False, "withheld_log": []}
     example_saved = (prompt_dir / "a5b.txt").exists()
 
-    for b in todo:
+    stop = threading.Event()
+
+    def one(b: dict):
+        """One record, start to finish. Touches no shared state: everything it learns is
+        returned, and the caller (one thread) does all counting and writing."""
         rid = b["record_id"]
+        if stop.is_set():
+            return ("skipped", rid)
+        t0 = time.monotonic()
         feats = b["features"]
         proto = protocols[rid]["protocol"]
         src, _ = es.locate_source(pool, feats, match_cols)
@@ -191,7 +203,7 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
         for t in builders.values():
             check_prompt(t, t, rcounts, fvals, tmpl_numbers)
         if dry:
-            continue
+            return ("dry", rid)
         metas = {}
         prompts_used = {}
         try:
@@ -248,9 +260,8 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
                       + "\n  explanations:\n" + prompts.hypotheses_text(a4.hypotheses, status),
             }
             shown = [n for n in ("a1", "a2", "a3", "a4") if not trust[n]["withheld"]]
-            for n in ("a1", "a2", "a3", "a4"):
-                if trust[n]["withheld"]:
-                    tally["withheld_log"].append({"record_id": rid, "agent": n, "T": trust[n]["T"]})
+            withheld_log = [{"record_id": rid, "agent": n, "T": trust[n]["T"]}
+                            for n in ("a1", "a2", "a3", "a4") if trust[n]["withheld"]]
             order = order_by_trust(shown, trust)
             creditable = {h.hypothesis_id for src_name, hyps in (("a3", a3.hypotheses), ("a4", a4.hypotheses))
                           if src_name in shown for h in hyps if h.benign and status[h.hypothesis_id] == core.SUPPORTED}
@@ -260,33 +271,18 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
             check_prompt(prompts_used["a5b"], builders["a5b"], rcounts, fvals, tmpl_numbers)
             assert "Fields of this flow's row" not in prompts_used["a5b"], "A5b must never see the raw row"
         except base.DailyQuotaExceeded as exc:
-            tally["stopped_on_quota"] = True
-            print(f"[STOPPED] {exc}", flush=True)
-            break
+            stop.set()
+            return ("quota", rid, str(exc))
         except (openrouter.OpenRouterError, openrouter.OpenRouterConfigError) as exc:
-            tally["stopped_on_error"] = f"{rid}: {exc}"
-            print(f"[STOPPED] {rid[:10]}: {exc}", flush=True)
-            break
+            stop.set()
+            return ("stopped", rid, f"{type(exc).__name__}: {exc}")
         except base.SchemaValidationFailed as exc:
-            spent = [c.get("cost_usd") for c in getattr(exc, "calls", [])]
             failure = {"record_id": rid, "model": sp.MODEL, "agent": exc.agent,
                        "prompt_version": prompts.VERSIONS.get(exc.agent), "reasons": list(exc.retry_reasons),
-                       "calls": getattr(exc, "calls", []), "rejected_attempts": getattr(exc, "rejected_attempts", [])}
-            tally["failed"].append(failure)
-            with open(failures_path(out), "a", encoding="utf-8") as f:
-                f.write(json.dumps(failure, default=str) + "\n")
-            tally["calls"] += exc.attempts
-            tally["cost_usd"] += sum(c for c in spent if c is not None)
-            print(f"[FAILED] {rid[:10]} {exc.agent}: {list(exc.retry_reasons)[:3]}", flush=True)
-            continue
+                       "calls": getattr(exc, "calls", []), "rejected_attempts": getattr(exc, "rejected_attempts", []),
+                       "elapsed_s": time.monotonic() - t0}
+            return ("failed", failure, exc.attempts, metas)
 
-        for m in metas.values():
-            if m.cached:
-                tally["cache_hits"] += 1
-            else:
-                tally["calls"] += 1 + m.schema_retries
-                tally["cost_usd"] += m.cost_usd or 0.0
-            tally["schema_retries"] += m.schema_retries
         line = {
             "record_id": rid, "batch": b.get("_batch"), "model": sp.MODEL, "protocol": proto, "time_of_day": tod,
             "verdict": a5b.verdict.value,
@@ -305,22 +301,80 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
             "a4": a4.model_dump(mode="json"), "a5a": a5a.model_dump(mode="json"), "a5b": a5b.model_dump(mode="json"),
             "stage_meta": {**upstream_meta, **{k: stage_meta(m) for k, m in metas.items()}},
             "prompt_versions": dict(prompts.VERSIONS),
+            "elapsed_s": time.monotonic() - t0,
         }
-        with open(out, "a", encoding="utf-8") as f:
-            f.write(json.dumps(line, default=str) + "\n")
-        if not example_saved and len(prompts_used) == 6:
-            for k, t in prompts_used.items():
-                (prompt_dir / f"{k}.txt").write_text(t, encoding="utf-8")
-            (prompt_dir / "record_id.txt").write_text(rid, encoding="utf-8")
-            example_saved = True
-        print(f"  {rid[:10]} {proto} verdict={a5b.verdict.value} checklist-alone={line['checklist_alone_verdict']}", flush=True)
+        return ("ok", line, metas, prompts_used, withheld_log)
+
+    def count(metas) -> None:
+        for m in metas.values():
+            if m.cached:
+                tally["cache_hits"] += 1
+            else:
+                tally["calls"] += 1 + m.schema_retries
+                tally["cost_usd"] += m.cost_usd or 0.0
+            tally["schema_retries"] += m.schema_retries
+
+    not_run = []
+    for res in _results(one, todo, workers):
+        kind = res[0]
+        if kind in ("dry",):
+            continue
+        if kind == "skipped":
+            not_run.append(res[1])
+        elif kind == "quota":
+            tally["stopped_on_quota"] = True
+            tally.setdefault("stopped_at", {"record_id": res[1], "reason": res[2]})
+            print(f"[STOPPED] {res[1][:10]}: {res[2]}", flush=True)
+        elif kind == "stopped":
+            tally.setdefault("stopped_on_error", f"{res[1]}: {res[2]}")
+            tally.setdefault("stopped_at", {"record_id": res[1], "reason": res[2]})
+            print(f"[STOPPED] {res[1][:10]}: {res[2]}", flush=True)
+        elif kind == "failed":
+            failure, attempts, metas = res[1], res[2], res[3]
+            tally["failed"].append(failure)
+            with open(failures_path(out), "a", encoding="utf-8") as f:
+                f.write(json.dumps(failure, default=str) + "\n")
+            count(metas)
+            tally["calls"] += attempts
+            tally["cost_usd"] += sum(c.get("cost_usd") or 0.0 for c in failure["calls"])
+            print(f"[FAILED] {failure['record_id'][:10]} {failure['agent']}: {failure['reasons'][:3]}", flush=True)
+        else:
+            _, line, metas, prompts_used, withheld_log = res
+            count(metas)
+            tally["withheld_log"] += withheld_log
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(json.dumps(line, default=str) + "\n")
+            if not example_saved and len(prompts_used) == 6:
+                for k, t in prompts_used.items():
+                    (prompt_dir / f"{k}.txt").write_text(t, encoding="utf-8")
+                (prompt_dir / "record_id.txt").write_text(line["record_id"], encoding="utf-8")
+                example_saved = True
+            print(f"  {line['record_id'][:10]} {line['protocol']} verdict={line['verdict']} "
+                  f"checklist-alone={line['checklist_alone_verdict']}", flush=True)
+    if not_run:
+        tally["not_run_after_stop"] = not_run
 
     if dry:
         print(f"dry run: every prompt template passed for {len(todo)} records")
         return 0
+    if sp.MODEL and openrouter.is_configured(sp.MODEL):
+        tally["cost_guard"] = {k: v for k, v in openrouter.cost_guard_state().items() if k != "ledger"}
     tally_path.write_text(json.dumps(tally, indent=2, default=str), encoding="utf-8")
-    print(json.dumps({k: v for k, v in tally.items() if k != "withheld_log"}, indent=2, default=str))
-    return 0
+    print(json.dumps({k: v for k, v in tally.items() if k not in ("withheld_log", "failed")}, indent=2, default=str))
+    return 3 if ("stopped_at" in tally) else 0
+
+
+def _results(one, todo, workers: int):
+    """Yields each record's result in completion order. With one worker it is a plain loop,
+    exactly the original behaviour; with more, records run concurrently."""
+    if workers <= 1:
+        for b in todo:
+            yield one(b)
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(one, b) for b in todo]
+        for f in concurrent.futures.as_completed(futures):
+            yield f.result()
 
 
 if __name__ == "__main__":

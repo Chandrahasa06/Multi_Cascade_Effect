@@ -97,6 +97,7 @@ def test_request_pins_provider_without_fallback(monkeypatch):
     assert sent["response_format"]["type"] == "json_schema"
     assert sent["response_format"]["json_schema"]["strict"] is True
     assert sent["model"] == SLUG
+    assert isinstance(meta.pop("latency_s"), float)
     assert meta == {"generation_id": "gen-1", "provider": "Anthropic", "model": SLUG, "requested_model": SLUG,
                     "pinned_provider": prov, "cost_usd": 0.0001, "input_tokens": 10, "output_tokens": 5,
                     "finish_reason": "stop"}
