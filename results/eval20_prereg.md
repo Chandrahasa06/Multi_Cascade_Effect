@@ -246,6 +246,38 @@ mapping is the one pre-registered for the selfcheck run (`results/selfcheck_prer
 Kimi K2.6, and Gemini at the margin, could exceed the $2.00 per-run ceiling if they reason at
 length.
 
+## Operational change during the run (commit `932c2d5`)
+
+**What happened.** Model 2 (`deepseek/deepseek-v4.1-flash`) stopped after 5 of 20 records.
+DeepInfra, the pinned endpoint, returned HTTP 429, which OpenRouter reported as an upstream
+rate limit on a pool shared with other DeepInfra users. The client gave up after its old
+retry limit of 6 attempts, about 31 seconds of backoff in total. Three records were cut off
+mid-stage, and 12 had not started. This was a property of the provider's capacity, not of
+the model's behaviour.
+
+**What changed:**
+
+- **429 backoff, for all models:** the client honours `retry-after` when given, and otherwise
+  backs off exponentially. It waits for up to 300 seconds in total per call before giving
+  up. Other retryable failures keep 6 attempts.
+- **Every HTTP retry and its wait is now recorded.** Latency is reported both raw and
+  excluding retry waits.
+- **DeepSeek concurrency:** dropped from 8 to 3, for DeepSeek only. Models 3–5 stay at 8,
+  unless they hit the same limit, in which case they also drop to 3, and that is noted.
+  The concurrency each model actually used is reported.
+
+**What did not change:** no prompt, schema, temperature, validator or scoring rule.
+
+**Haiku is unaffected and is not re-run.** Its run printed no HTTP retry line of any kind,
+so it saw zero 429s.
+
+**How DeepSeek resumes:**
+- It continues from its 5 completed records.
+- Stages that completed inside the 3 interrupted records are reused from the call cache.
+- Its raw latency includes rate-limit waits, so it is not comparable to Haiku's.
+- Its first 5 records predate retry-wait recording, so they are excluded from the
+  latency-excluding-waits figure.
+
 ## Selection rule (fixed now)
 
     Winner = highest Youden's J = (attacks caught / 10) + (benign cleared / 10) - 1
