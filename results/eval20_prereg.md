@@ -278,6 +278,53 @@ so it saw zero 429s.
 - Its first 5 records predate retry-wait recording, so they are excluded from the
   latency-excluding-waits figure.
 
+## Follow-up variant `holdout3`: A3 predicts withheld fields (commit `a4b0dfb`, written before any call)
+
+**Why.** In the selfcheck run, 197 of 204 hypotheses were SUPPORTED and only 4 were struck
+out. Haiku's own eval20 run had A3 at 79 SUPPORTED, 1 CONTRADICTED and 0 UNCHECKABLE. A3
+predicts fields it can see, so the check cannot reject anything.
+
+**Change** (Haiku 5.5 only, pinned `anthropic` endpoint, the same 20 records):
+
+- **What is withheld:**
+  - For each record, 3 of the 10 escalation features (`ESCALATION_FEATURES`) are withheld
+    from A3. They are chosen by `random.Random(f"20261016:{record_id}")`, so the choice
+    depends on the opaque record id only, and is the same for every run.
+  - Their exact twins are withheld too, because those carry the same value:
+    `Total Fwd Packets` for `Subflow Fwd Packets`, and `Subflow Bwd Packets` for
+    `Total Backward Packets`. Both pairs were checked to be equal on all 20 records.
+  - So are A1/A2 claims that cite or name a withheld field, and A2 absences that read one.
+    Building the prompts dropped 63 such claims in total.
+  - A code assertion refuses any A3 prompt whose record-specific text names a withheld field.
+- **What A3 must predict:** every A3 hypothesis must give at least one prediction for each
+  withheld field, and predictions only about withheld fields. This is enforced by the
+  validator; retries stay at 3.
+- **How each hypothesis is graded**, against the real withheld values:
+  - **CONTRADICTED** if any prediction is false. It is struck out, and A5b cannot credit it.
+  - **SUPPORTED** only if every withheld field has a true prediction that could have failed.
+  - **UNCHECKABLE** otherwise. A prediction "cannot fail" if the existing vacuity test says
+    so, or if it is a bound every legal value meets: `Init_Win_bytes_*` lie in [-1, 65535]
+    by protocol, so a prediction such as ≤ 65535 cannot fail. No population data is used.
+- **A4 is unchanged** and still checked against the full row.
+
+**Unchanged:** A1, A2, A4, A5a (v3 prompts, verbatim, and their cached outputs from the
+eval20 Haiku run are reused, so only A3 and A5b are new calls), the conditions, the other
+validators, the scoring rule and the J criterion.
+
+**Prompt versions:** A3 is `a3_selfcheck_v4_holdout`. A5b's text is v3's, but it is versioned
+`a5b_selfcheck_v4_holdout` because its input changes.
+
+**Known residual leak.** Some withheld fields are partly derivable by arithmetic from visible
+ones; for example, `Bwd Packets/s` from `Total Backward Packets` and `Flow Duration`, and
+`Packet Length Mean` from length totals and packet counts. Exact twins are removed; derivable
+fields are not.
+
+**Stop and estimate:** cost stop $0.50 for this run. Expected $0.05–0.10 (Haiku's A3+A5b cost
+$0.0495 on eval20).
+
+**Reading the result:** if the strike-out rate stays near zero, the hypotheses were vacuous
+rather than circular, and that is reported as the finding, not tuned.
+
 ## Selection rule (fixed now)
 
     Winner = highest Youden's J = (attacks caught / 10) + (benign cleared / 10) - 1
