@@ -362,6 +362,56 @@ $0.041 on eval20, A5b $0.018 on holdout3). The key has $2.02 left.
 together. On any record where none survives, A5b's verdict is the override test: if it still
 clears the flow, A5b is overriding the grounding.
 
+## Follow-up variant `holdout3_noquota`: no benign quota (commit `fdcb5ec`, written before any call)
+
+**Why.** "At least 2 benign hypotheses per agent" guarantees every record has 4 or more benign
+hypotheses, and A5b needs only one survivor to refute a condition. The gate therefore cannot
+empty a record by construction. In `holdout3_a4`, every record kept at least one benign
+survivor.
+
+**Change** (Haiku 5.5, pinned `anthropic` endpoint, the same 20 records, the same held-out
+fields, A3 and A4 both gated):
+
+- The minimum-benign rule is removed for A3 and A4 (validator `MIN_BENIGN = 0`).
+- The prompt sentence "Hypotheses: 3 to 5, at least 2 benign." is replaced, and nothing
+  else in the prompt changes (asserted in code), by: "Hypotheses: 3 to 5. There is no
+  required number of benign hypotheses: propose a benign hypothesis ONLY where you can
+  state a falsifiable prediction about the withheld fields. A hypothesis that exists to
+  fill a quota is not evidence."
+
+**Unchanged:**
+- The 3-to-5 bounds and every other rule, prompt, condition and validator.
+- The pre-registered scoring rule and the J criterion.
+- A1, A2 and A5a, reused from cache.
+
+**Prompt versions:** A3 is `a3_selfcheck_v6_noquota`, A4 is `a4_selfcheck_v6_noquota`, and
+A5b is `a5b_selfcheck_v6_noquota`. A5b's text is unchanged; its input changes.
+
+**What this tests.** This is a test of the mechanism, not an attempt to raise recall. The
+question is whether the grounding gate, once it can empty a record, changes A5b's verdict.
+
+**Expected failure mode, which will be reported as the result and not tuned away.** If
+benign flows also lose all their benign hypotheses, false alarms rise and J falls.
+
+**What the override test can and cannot show, fixed before the run by the existing
+validators:**
+
+- On a record with no condition marked yes, the verdict is `consistent_with_benign` (or
+  `insufficient_evidence`) by rule. The gate cannot affect those records.
+- On a record with a condition marked yes and no creditable benign hypothesis:
+  - A refutation must cite a SUPPORTED benign hypothesis, so none can be valid.
+  - The only allowed verdicts are therefore `anomalous_and_unexplained` and
+    `insufficient_evidence`.
+  - A5b cannot clear such a record, because the validator rejects it. An override would
+    show up in two ways instead:
+    - (a) rejected A5b attempts that tried to refute without a SUPPORTED hypothesis, or
+      tried to clear the flow. These are saved in full on disk.
+    - (b) A5b retreating to `insufficient_evidence`.
+  - Both are reported.
+
+**Stop and estimate:** hard limit $0.50, guard trips at $0.45. Expected about $0.10, for
+new A3, A4 and A5b calls.
+
 ## Selection rule (fixed now)
 
     Winner = highest Youden's J = (attacks caught / 10) + (benign cleared / 10) - 1
