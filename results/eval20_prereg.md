@@ -149,9 +149,13 @@ not used.) The rules were then changed as follows, before any comparison run:
 
 ## Code and models the comparison runs at
 
-**Code:** commit `5297e39`. That commit holds the selfcheck pipeline, the OpenRouter backend,
-the v3 prompts, the rewritten validators and their tests. A clean checkout of it imports, and
-its tests pass, except two fixtures that need gitignored `results/` data files.
+**Code:** the comparison runs at commit `211e15c`.
+
+- `5297e39` holds the selfcheck pipeline, the OpenRouter backend, the v3 prompts, the
+  rewritten validators and their tests. A clean checkout of it imports, and its tests pass,
+  except two fixtures that need gitignored `results/` data files.
+- `211e15c` adds the cost stop, concurrency of 8 within a model, and the scorer. It changes
+  no prompt, validator or schema.
 
 **Models**, in run order (`config/openrouter.json` `sequence`). Every slug was resolved from
 the full `/api/v1/models` catalog, fetched with curl, and verified against its
@@ -184,10 +188,44 @@ DeepSeek's and Z.AI's own endpoints do not offer structured outputs, so rule 2 a
 those two models. Every request pins the endpoint (`only`/`order`, `allow_fallbacks: false`)
 and also its disclosed quantization.
 
-**Sampling:** temperature is unset for every model, so each runs at its provider's default.
-Haiku 5.5 accepts no temperature at all, and Moonshot's endpoint does not accept one either,
-so no single fixed value could apply to all five. The historical Gemini run used 0.7, so it
-differs from this comparison in temperature as well as in prompt version and API path.
+**Sampling: no temperature is set for any model.** Every model runs at its provider's default.
+
+- Why: no single value is accepted by all five endpoints. Haiku 5.5 takes no temperature at
+  all, and Moonshot's endpoint does not either, so a uniform provider default is the only
+  consistent choice.
+- The historical Gemini run used 0.7, so it differs from this comparison in temperature as
+  well as in prompt version and API path.
+
+**Runaway guards** (hard stops set above the long-reasoning estimates; not budgets):
+
+| model | per-run stop |
+|---|---|
+| `anthropic/claude-haiku-5.5` | $0.50 |
+| `deepseek/deepseek-v4.1-flash` | $0.75 |
+| `z-ai/glm-5.2` | $2.50 |
+| `google/gemini-3.5-flash-lite` | $2.50 |
+| `moonshotai/kimi-k2.6` | $4.50 |
+| global, all five | $10.00 |
+
+- How it works: every priced call is appended to `results/eval20_runs/_spend_ledger.jsonl`.
+  Before each call, its model's total and the global total are checked against the stops.
+  When one trips, no further call is sent, and the tally records where the run stopped and
+  which records were not run.
+- Calls already in flight complete, so a stop can overshoot by at most 8 calls' cost.
+- A run that trips a stop is treated as a bug, not as a slow model.
+
+**Concurrency:** up to 8 concurrent calls within a model. Models run one at a time, in the
+order above.
+
+**Scoring** (`eval/score_eval20.py`, the only code that opens the key). The verdict-to-call
+mapping is the one pre-registered for the selfcheck run (`results/selfcheck_preregistered.md`):
+
+- **Caught:** an attack given `anomalous_and_unexplained`.
+- **Flagged:** a benign flow given `anomalous_and_unexplained`.
+- **Cleared:** a benign flow given `consistent_with_benign` or `anomalous_but_explicable`.
+- **Neither caught nor cleared:** `insufficient_evidence`, or a record lost to validation.
+- **Inconclusive:** a run with more than 30% `insufficient_evidence` is reported as
+  inconclusive, alongside its J.
 
 **Cost estimate (before any run):**
 
