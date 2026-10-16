@@ -325,6 +325,43 @@ $0.0495 on eval20).
 **Reading the result:** if the strike-out rate stays near zero, the hypotheses were vacuous
 rather than circular, and that is reported as the finding, not tuned.
 
+## Follow-up variant `holdout3_a4`: A4 withheld too (commit `a497731`, written before any call)
+
+**Why.** The A3 hold-out could not change any verdict, because A4 still saw the full row:
+
+- 67 of A4's 68 hypotheses were supported, and every record kept 2–3 creditable A4 benign
+  hypotheses.
+- On the 8 records with a condition marked yes, A5b cited A4 on 7, and on 4 of them only A4.
+- No record lost all of its benign A3 hypotheses.
+
+**Change** (Haiku 5.5, pinned `anthropic` endpoint, the same 20 records):
+
+- A4 receives the row with the same withheld fields as A3 for that record: the same seed
+  (20261016), the same 3 escalation features, and the same twins.
+- A code assertion refuses any A4 prompt whose record-specific text names a withheld field.
+- A4's hypotheses follow A3's rule: predict each withheld field, and only those. They get the
+  same SUPPORTED / CONTRADICTED / UNCHECKABLE marking, and a CONTRADICTED A4 hypothesis is
+  struck out and cannot be credited.
+- A4's isolation from the chain is unchanged. It sees no A1/A2/A3 output, and it is still
+  submitted before A1 runs.
+
+**Unchanged:** A1, A2, A3 and A5a are reused from cache, with byte-identical prompts. The
+conditions, the other validators, the scoring rule and the J criterion are unchanged.
+
+**Prompt versions:** A4 is `a4_selfcheck_v5_holdout`. A5b's text is v3's, versioned
+`a5b_selfcheck_v5_holdout` because its input changes.
+
+**Side effect:** A4's other output (claims and absences) now comes from the redacted row. A4's
+cited values feed the existing blind-corroboration trust component, so trust bands, and which
+agents A5b is shown, may shift. This is a consequence of the change, not a separate edit.
+
+**Stop and estimate:** hard limit $0.50, guard trips at $0.45. Expected about $0.06 (A4 cost
+$0.041 on eval20, A5b $0.018 on holdout3). The key has $2.02 left.
+
+**Primary readout:** per record, whether any benign hypothesis survives across A3 and A4
+together. On any record where none survives, A5b's verdict is the override test: if it still
+clears the flow, A5b is overriding the grounding.
+
 ## Selection rule (fixed now)
 
     Winner = highest Youden's J = (attacks caught / 10) + (benign cleared / 10) - 1
