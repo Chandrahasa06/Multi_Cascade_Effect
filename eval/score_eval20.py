@@ -148,7 +148,7 @@ def main() -> int:
     models = args.models or openrouter.load_config()["sequence"]
     rows = [score_model(m, key, spend, args.variant, args.dataset) for m in models
             if (run_dir(m, args.variant, args.dataset) / "tally.json").exists()]
-    L = ["# eval20 results", "", "Rule: `results/eval20_prereg.md`. Caught = anomalous_and_unexplained on an attack; "
+    L = [f"# {args.dataset} results", "", "Rule: `results/eval20_prereg.md`. Caught = anomalous_and_unexplained on an attack; "
          "cleared = consistent_with_benign or anomalous_but_explicable on a benign flow; insufficient_evidence and "
          "lost records are neither. J = caught/attacks + cleared/benign - 1.", "",
          "| model | caught | benign flagged | benign cleared | J | lost (A1/A2/A3/A4/A5a/A5b) | "
