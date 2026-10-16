@@ -90,7 +90,7 @@ def _fake_body(content="{}", provider="Anthropic"):
 def test_request_pins_provider_without_fallback(monkeypatch):
     sent = {}
     monkeypatch.setattr(openrouter, "verify", lambda m: {"provider_name": "Anthropic"})
-    monkeypatch.setattr(openrouter, "_post", lambda payload: sent.update(payload) or _fake_body())
+    monkeypatch.setattr(openrouter, "_post", lambda payload: (sent.update(payload) or _fake_body(), []))
     _, meta = openrouter.generate(SLUG, "p", SCClaimsResponse, openrouter.temperature_for(SLUG))
     prov = CFG["models"][SLUG]["provider"]
     assert sent["provider"] == {"order": [prov], "only": [prov], "allow_fallbacks": False, "require_parameters": True}
@@ -98,6 +98,8 @@ def test_request_pins_provider_without_fallback(monkeypatch):
     assert sent["response_format"]["json_schema"]["strict"] is True
     assert sent["model"] == SLUG
     assert isinstance(meta.pop("latency_s"), float)
+    assert meta.pop("http_retries") == [] and meta.pop("retry_wait_s") == 0
+    assert isinstance(meta.pop("latency_excl_retry_s"), float)
     assert meta == {"generation_id": "gen-1", "provider": "Anthropic", "model": SLUG, "requested_model": SLUG,
                     "pinned_provider": prov, "cost_usd": 0.0001, "input_tokens": 10, "output_tokens": 5,
                     "finish_reason": "stop"}
@@ -105,7 +107,7 @@ def test_request_pins_provider_without_fallback(monkeypatch):
 
 def test_served_by_another_provider_fails_loudly(monkeypatch):
     monkeypatch.setattr(openrouter, "verify", lambda m: {"provider_name": "Anthropic"})
-    monkeypatch.setattr(openrouter, "_post", lambda payload: _fake_body(provider="Somebody Else"))
+    monkeypatch.setattr(openrouter, "_post", lambda payload: (_fake_body(provider="Somebody Else"), []))
     with pytest.raises(openrouter.OpenRouterError, match="pinned"):
         openrouter.generate(SLUG, "p", SCClaimsResponse, openrouter.temperature_for(SLUG))
 
@@ -185,7 +187,7 @@ def test_eval20_upstream_cache_is_per_model():
 def test_disclosed_quantization_is_pinned_too(monkeypatch):
     sent = {}
     monkeypatch.setattr(openrouter, "verify", lambda m: {"provider_name": "Anthropic", "quantization": "fp8"})
-    monkeypatch.setattr(openrouter, "_post", lambda payload: sent.update(payload) or _fake_body())
+    monkeypatch.setattr(openrouter, "_post", lambda payload: (sent.update(payload) or _fake_body(), []))
     openrouter.generate(SLUG, "p", SCClaimsResponse, openrouter.temperature_for(SLUG))
     assert sent["provider"]["quantizations"] == ["fp8"]
     monkeypatch.setattr(openrouter, "verify", lambda m: {"provider_name": "Anthropic", "quantization": "unknown"})

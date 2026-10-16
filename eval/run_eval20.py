@@ -69,14 +69,14 @@ def main() -> int:
     m = openrouter.model_config(args.model)
     if "cost_ceiling_usd" not in m or "global_cost_ceiling_usd" not in cfg:
         raise SystemExit(f"{args.model}: no cost ceiling in {openrouter.CONFIG_PATH}; refusing to run unguarded")
-    openrouter.set_cost_guard(args.model, m["cost_ceiling_usd"], cfg["global_cost_ceiling_usd"], LEDGER,
-                              cfg.get("max_concurrent", 1))
+    concurrency = m.get("max_concurrent", cfg.get("max_concurrent", 1))
+    openrouter.set_cost_guard(args.model, m["cost_ceiling_usd"], cfg["global_cost_ceiling_usd"], LEDGER, concurrency)
     g = openrouter.cost_guard_state()
     print(f"cost guard: run ${g['run_spent']:.4f} of ${g['run_ceiling']:.2f}, "
-          f"global ${g['global_spent']:.4f} of ${g['global_ceiling']:.2f}; concurrency {cfg.get('max_concurrent', 1)}")
+          f"global ${g['global_spent']:.4f} of ${g['global_ceiling']:.2f}; concurrency {concurrency}")
     return rs.run(blinds, out=d / "records.jsonl", tally_path=d / "tally.json", upstream=d / "upstream",
                   prompt_dir=d / "prompts", protocols=protocols, pool=pool, match_cols=match_cols,
-                  counts=known_counts(), dry=args.dry_run, prompts=PROMPTS, workers=cfg.get("max_concurrent", 1))
+                  counts=known_counts(), dry=args.dry_run, prompts=PROMPTS, workers=concurrency)
 
 
 if __name__ == "__main__":

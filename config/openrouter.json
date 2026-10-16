@@ -21,7 +21,8 @@
       "provider": "deepinfra/fp8",
       "temperature": null,
       "max_tokens": 16000,
-      "cost_ceiling_usd": 0.75
+      "cost_ceiling_usd": 0.75,
+      "max_concurrent": 3
     },
     "z-ai/glm-5.2": {
       "provider": "streamlake/fp8",

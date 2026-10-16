@@ -28,7 +28,7 @@ def _pin(monkeypatch, cost):
     monkeypatch.setattr(openrouter, "verify", lambda m: {"provider_name": "Anthropic", "quantization": None,
                                                           "pricing": {"prompt": "0.000001", "completion": "0.000002"}})
     sent = []
-    monkeypatch.setattr(openrouter, "_post", lambda payload: sent.append(1) or _body(cost))
+    monkeypatch.setattr(openrouter, "_post", lambda payload: (sent.append(1) or _body(cost), []))
     return sent
 
 
@@ -36,7 +36,7 @@ def test_every_model_in_the_sequence_has_a_ceiling_and_the_values_are_as_set():
     want = {"anthropic/claude-haiku-5.5": 0.50, "deepseek/deepseek-v4.1-flash": 0.75, "z-ai/glm-5.2": 2.50,
             "google/gemini-3.5-flash-lite": 2.50, "moonshotai/kimi-k2.6": 4.50}
     assert {s: CFG["models"][s]["cost_ceiling_usd"] for s in CFG["sequence"]} == want
-    assert CFG["global_cost_ceiling_usd"] == 10.0 and CFG["max_concurrent"] == 8
+    assert CFG["global_cost_ceiling_usd"] == 10.0 and CFG["max_concurrent"] == 8  # default; see per-model test
     assert all(CFG["models"][s]["temperature"] is None for s in CFG["sequence"])
 
 
@@ -101,3 +101,55 @@ def test_scorer_is_not_reachable_from_the_decision_path():
     from eval import run_eval20
     src = "".join(inspect.getsource(m) for m in (run_eval20, rs, sp, openrouter))
     assert "score_eval20" not in src and "eval20_records" not in src
+
+
+# ---------------------------------------------------------------- 429 backoff
+class _Resp:
+    def __init__(self, status, headers=None, body=None):
+        self.status_code, self.headers = status, headers or {}
+        self._body = body if body is not None else {"error": {"code": status, "message": "x"}}
+        self.content = b"x"
+
+    def json(self):
+        return self._body
+
+
+def _ok():
+    return _Resp(200, body={"id": "g", "choices": [{"message": {"content": "{}"}}]})
+
+
+def _install(monkeypatch, responses):
+    import httpx
+    it = iter(responses)
+    waits = []
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: next(it))
+    monkeypatch.setattr(openrouter.time, "sleep", lambda s: waits.append(s))
+    monkeypatch.setattr(openrouter, "_api_key", lambda: "k")
+    return waits
+
+
+def test_429_honours_retry_after_and_records_each_wait(monkeypatch):
+    waits = _install(monkeypatch, [_Resp(429, {"retry-after": "7"}), _Resp(429), _ok()])
+    body, retries = openrouter._post({})
+    assert body["id"] == "g" and [r["status"] for r in retries] == [429, 429]
+    assert 7 <= waits[0] < 8 and retries[0]["wait_s"] == waits[0]
+
+
+def test_429_gives_up_only_after_about_five_minutes_of_waiting(monkeypatch):
+    waits = _install(monkeypatch, [_Resp(429)] * 100)
+    with pytest.raises(openrouter.OpenRouterError, match="gave up"):
+        openrouter._post({})
+    assert openrouter.RATE_LIMIT_BUDGET_S == 300.0
+    assert 240 <= sum(waits) <= 300 and len(waits) > 6   # far beyond the old 6-attempt, ~31 s limit
+
+
+def test_non_retryable_error_is_not_retried(monkeypatch):
+    waits = _install(monkeypatch, [_Resp(400)])
+    with pytest.raises(openrouter.OpenRouterError, match="HTTP 400"):
+        openrouter._post({})
+    assert waits == []
+
+
+def test_deepseek_alone_runs_at_three():
+    conc = {s: CFG["models"][s].get("max_concurrent", CFG["max_concurrent"]) for s in CFG["sequence"]}
+    assert conc == {s: (3 if s == "deepseek/deepseek-v4.1-flash" else 8) for s in CFG["sequence"]}

@@ -95,7 +95,8 @@ def agent_trust(name: str, out, row: Dict[str, float], a4_pairs, protocol: Optio
 def stage_meta(m) -> dict:
     return {"cached": bool(m.cached), "schema_retries": int(m.schema_retries), "retry_reasons": list(m.retry_reasons),
             "provider": m.provider, "served_model": m.served_model, "generation_ids": list(m.generation_ids),
-            "cost_usd": m.cost_usd, "elapsed_s": m.elapsed_s, "rejected_attempts": list(m.rejected_attempts)}
+            "cost_usd": m.cost_usd, "elapsed_s": m.elapsed_s, "retry_wait_s": m.retry_wait_s,
+            "http_retries": m.http_retries, "rejected_attempts": list(m.rejected_attempts)}
 
 
 def failures_path(out: Path) -> Path:
@@ -359,6 +360,13 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
         return 0
     if sp.MODEL and openrouter.is_configured(sp.MODEL):
         tally["cost_guard"] = {k: v for k, v in openrouter.cost_guard_state().items() if k != "ledger"}
+    # a resumed run keeps the history of every invocation, so e.g. a change of concurrency shows
+    prior = json.loads(tally_path.read_text(encoding="utf-8")) if tally_path.exists() else {}
+    tally["invocations"] = prior.get("invocations", [{"concurrency": None, "note": "first invocation, not recorded",
+                                                      "calls": prior.get("calls"), "cost_usd": prior.get("cost_usd")}]
+                                     if prior else []) + [
+        {"t": time.time(), "concurrency": workers, "already_done": len(done), "calls": tally["calls"],
+         "cost_usd": tally["cost_usd"], "stopped_at": tally.get("stopped_at")}]
     tally_path.write_text(json.dumps(tally, indent=2, default=str), encoding="utf-8")
     print(json.dumps({k: v for k, v in tally.items() if k not in ("withheld_log", "failed")}, indent=2, default=str))
     return 3 if ("stopped_at" in tally) else 0

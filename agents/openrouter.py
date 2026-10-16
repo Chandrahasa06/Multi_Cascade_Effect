@@ -31,6 +31,8 @@ FORBIDDEN_SLUGS = frozenset({"openrouter/free"})
 MAX_HTTP_RETRIES = 6
 RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
 REQUEST_TIMEOUT_S = 300.0
+#: total time a single call may spend waiting out 429s before giving up
+RATE_LIMIT_BUDGET_S = 300.0
 
 #: keywords strict structured output does not accept on every provider (Anthropic rejects
 #: numeric and string bounds and array bounds other than minItems 0/1). Dropped from the
@@ -217,32 +219,68 @@ def strict_schema(model_cls: Type[BaseModel]) -> dict:
 
 
 # ------------------------------------------------------------------ request
-def _post(payload: dict) -> dict:
+def _retry_after_s(headers) -> float:
+    """The server's own hint, in seconds or as an HTTP date; 0 if absent or unreadable."""
+    v = headers.get("retry-after")
+    if not v:
+        return 0.0
+    try:
+        return max(0.0, float(v))
+    except ValueError:
+        from email.utils import parsedate_to_datetime
+        try:
+            return max(0.0, parsedate_to_datetime(v).timestamp() - time.time())
+        except (TypeError, ValueError):
+            return 0.0
+
+
+def _post(payload: dict) -> Tuple[dict, list]:
+    """One completion, retried. Returns (body, retries): one {status, wait_s} per retry.
+
+    A 429 is waited out for up to RATE_LIMIT_BUDGET_S in total per call, honouring the
+    server's retry-after when given and backing off exponentially otherwise. Other
+    retryable failures (5xx, 408, 409, transport errors) get MAX_HTTP_RETRIES attempts.
+    """
     import httpx
 
     base = load_config()["api_base"]
     headers = {"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"}
-    last = None
-    for attempt in range(MAX_HTTP_RETRIES):
+    retries: list = []
+    waited_429 = 0.0
+    n_429 = n_other = 0
+    while True:
         try:
             r = httpx.post(f"{base}/chat/completions", headers=headers, json=payload, timeout=REQUEST_TIMEOUT_S)
         except httpx.TransportError as exc:
-            last = exc
-            time.sleep(min(60.0, 2.0 ** attempt) + random.uniform(0, 1))
+            if n_other >= MAX_HTTP_RETRIES - 1:
+                raise
+            wait = min(60.0, 2.0 ** n_other) + random.uniform(0, 1)
+            n_other += 1
+            retries.append({"status": "transport", "wait_s": wait})
+            time.sleep(wait)
             continue
         body = r.json() if r.content else {}
         err = body.get("error") if isinstance(body, dict) else None
         code = r.status_code if r.status_code != 200 else (int(err.get("code", 0) or 0) if err else 200)
         if code == 200 and body.get("choices"):
-            return body
+            return body, retries
         last = OpenRouterError(f"HTTP {r.status_code}: {json.dumps(err or body)[:800]}")
-        if code in RETRYABLE_STATUS and attempt < MAX_HTTP_RETRIES - 1:
-            wait = float(r.headers.get("retry-after", 0) or 0) or min(60.0, 2.0 ** attempt)
-            print(f"[openrouter] {code}, retry {attempt + 1}/{MAX_HTTP_RETRIES - 1} in {wait:.1f}s", flush=True)
-            time.sleep(wait + random.uniform(0, 1))
-            continue
-        raise last
-    raise last
+        if code == 429:
+            wait = _retry_after_s(r.headers) or min(60.0, 2.0 ** (n_429 + 1))
+            wait += random.uniform(0, 1)
+            if waited_429 + wait > RATE_LIMIT_BUDGET_S:
+                raise OpenRouterError(f"{last} -- gave up after {n_429} retries and {waited_429:.0f}s of 429 backoff")
+            n_429 += 1
+            waited_429 += wait
+        elif code in RETRYABLE_STATUS and n_other < MAX_HTTP_RETRIES - 1:
+            wait = _retry_after_s(r.headers) or min(60.0, 2.0 ** n_other)
+            wait += random.uniform(0, 1)
+            n_other += 1
+        else:
+            raise last
+        retries.append({"status": code, "wait_s": wait})
+        print(f"[openrouter] {code}, retry in {wait:.1f}s (429 backoff so far {waited_429:.0f}s)", flush=True)
+        time.sleep(wait)
 
 
 def _cost_from_generation(gen_id: str) -> Optional[float]:
@@ -284,8 +322,9 @@ def generate(model: str, prompt: str, response_schema: Type[BaseModel], temperat
     _check_ceiling(model)
     t0 = time.monotonic()
     with _sem:
-        body = _post(payload)
+        body, http_retries = _post(payload)
     latency = time.monotonic() - t0
+    retry_wait = sum(x["wait_s"] for x in http_retries)
     choice = body["choices"][0]
     usage = body.get("usage") or {}
     cost = usage.get("cost")
@@ -302,6 +341,9 @@ def generate(model: str, prompt: str, response_schema: Type[BaseModel], temperat
         "output_tokens": usage.get("completion_tokens"),
         "finish_reason": choice.get("finish_reason"),
         "latency_s": latency,
+        "retry_wait_s": retry_wait,
+        "latency_excl_retry_s": latency - retry_wait,
+        "http_retries": http_retries,
     }
     _charge(meta, pinned.get("pricing", {}))
     if pinned["provider_name"] and meta["provider"] != pinned["provider_name"]:

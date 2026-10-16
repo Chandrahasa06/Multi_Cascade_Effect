@@ -293,6 +293,9 @@ class CallMetadata:
     cost_usd: Optional[float] = None
     #: rejected attempts in full (text, validator message, call metadata); empty if none
     rejected_attempts: List[dict] = field(default_factory=list)
+    #: OpenRouter only: time spent waiting out HTTP retries (429 etc.) and how many
+    retry_wait_s: float = 0.0
+    http_retries: int = 0
 
 
 _client = None
@@ -464,6 +467,8 @@ def call_structured(
             generation_ids=cached.get("generation_ids", []),
             cost_usd=cached.get("cost_usd"),
             rejected_attempts=cached.get("rejected_attempts", []),
+            retry_wait_s=cached.get("retry_wait_s", 0.0),
+            http_retries=cached.get("http_retries", 0),
         )
 
     client = None if via_openrouter else _get_client()
@@ -519,6 +524,8 @@ def call_structured(
             "provider": calls[-1]["provider"], "served_model": calls[-1]["model"],
             "generation_ids": [c["generation_id"] for c in calls],
             "cost_usd": None if any(c is None for c in costs) else float(sum(costs)),
+            "retry_wait_s": float(sum(c.get("retry_wait_s") or 0.0 for c in calls)),
+            "http_retries": int(sum(len(c.get("http_retries") or []) for c in calls)),
             "calls": calls,
         }
 
@@ -565,4 +572,6 @@ def call_structured(
         generation_ids=or_fields.get("generation_ids", []),
         cost_usd=or_fields.get("cost_usd"),
         rejected_attempts=rejected,
+        retry_wait_s=or_fields.get("retry_wait_s", 0.0),
+        http_retries=or_fields.get("http_retries", 0),
     )
