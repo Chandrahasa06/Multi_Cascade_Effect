@@ -164,3 +164,29 @@ def test_a4_is_still_submitted_before_a1_in_holdout_mode():
     i4 = src.index("px.submit(sp.run_a4_holdout")
     i1 = src.index("sp.run_a1(rid, flow)")
     assert i4 < i1
+
+
+# ---------------------------------------------------------------- no benign quota (v6)
+from agents.prompts import selfcheck_prompts_v6 as v6  # noqa: E402
+
+
+def test_v6_changes_only_the_quota_sentence_in_a3_and_a4():
+    flow = v5.flow_block({"Flow Duration": 1.0}, "TCP", "10:00")
+    held = ("Flow IAT Mean", "Init_Win_bytes_backward", "min_seg_size_forward")
+    for new, old in ((v6.a3(flow, "x", "y", held), v5.a3(flow, "x", "y", held)), (v6.a4(flow, held), v5.a4(flow, held))):
+        assert "at least 2 benign" not in new and "fill a quota is not evidence" in new
+        assert new.replace(v6.NO_QUOTA_SENTENCE, v6.QUOTA_SENTENCE) == old
+    assert {k for k in v5.VERSIONS if v5.VERSIONS[k] != v6.VERSIONS[k]} == {"a3", "a4", "a5b"}
+    assert v6.a1(flow) == v5.a1(flow) and v6.a5a(flow) == v5.a5a(flow) and v6.a5b("c", "j", []) == v5.a5b("c", "j", [])
+
+
+def test_quota_is_gone_only_in_v6_and_the_3_to_5_bounds_remain():
+    hostile = [SCHypothesis(hypothesis_id=f"a3_h{i}", description="d", benign=False,
+                            predictions=[FieldPrediction(field="x", op="gt", value=0)] * 2) for i in range(3)]
+    sp.validate_hypotheses(hostile, "a3_h", v6.MIN_BENIGN)                 # v6: zero benign is fine
+    with pytest.raises(ValueError, match="at least 2"):
+        sp.validate_hypotheses(hostile, "a3_h")                           # v1-v5 default unchanged
+    with pytest.raises(ValueError, match="3 to 5"):
+        sp.validate_hypotheses(hostile * 2, "a3_h", v6.MIN_BENIGN)        # max 5 kept
+    with pytest.raises(ValueError, match="3 to 5"):
+        sp.validate_hypotheses(hostile[:2], "a3_h", v6.MIN_BENIGN)        # min 3 kept

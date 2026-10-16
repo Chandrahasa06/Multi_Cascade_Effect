@@ -66,11 +66,11 @@ def validate_absences(absences) -> None:
             raise ValueError(f"{a.absence.value}: cite the field(s) you read")
 
 
-def validate_hypotheses(hyps, prefix: str) -> None:
+def validate_hypotheses(hyps, prefix: str, min_benign: int = 2) -> None:
     if not 3 <= len(hyps) <= 5:
         raise ValueError(f"expected 3 to 5 hypotheses, got {len(hyps)}")
-    if sum(h.benign for h in hyps) < 2:
-        raise ValueError("at least 2 hypotheses must be benign")
+    if sum(h.benign for h in hyps) < min_benign:
+        raise ValueError(f"at least {min_benign} hypotheses must be benign")
     seen = set()
     for h in hyps:
         if not h.hypothesis_id.startswith(prefix):
@@ -169,7 +169,7 @@ def run_a3_holdout(rid, flow_redacted, a1, a2, held, hidden, visible):
 
     def v(r):
         errors = []
-        for check in (lambda: validate_claims(r.claims, "a3_c"), lambda: validate_hypotheses(r.hypotheses, "a3_h"),
+        for check in (lambda: validate_claims(r.claims, "a3_c"), lambda: validate_hypotheses(r.hypotheses, "a3_h", getattr(P, "MIN_BENIGN", 2)),
                       lambda: ho.validate_holdout_predictions(r.hypotheses, held)):
             try:
                 check()
@@ -195,7 +195,7 @@ def run_a4_holdout(rid, flow_redacted, held, hidden, visible):
     def v(r):
         errors = []
         for check in (lambda: validate_claims(r.claims, "a4_c"), lambda: validate_absences(r.absences),
-                      lambda: validate_hypotheses(r.hypotheses, "a4_h"),
+                      lambda: validate_hypotheses(r.hypotheses, "a4_h", getattr(P, "MIN_BENIGN", 2)),
                       lambda: ho.validate_holdout_predictions(r.hypotheses, held)):
             try:
                 check()
