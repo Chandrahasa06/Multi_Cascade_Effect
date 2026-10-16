@@ -31,7 +31,9 @@ LEDGER = RUNS / "_spend_ledger.jsonl"
 
 
 #: variant runs: name -> (prompt module, holdout mode, per-run cost stop in USD)
-VARIANTS = {"holdout3": (PROMPTS_HOLDOUT, True, 0.50)}
+#: holdout3 trips at $0.45 so calls already in flight (at most 8, ~$0.005 each for Haiku) cannot carry
+#: spend past the $0.50 limit.
+VARIANTS = {"holdout3": (PROMPTS_HOLDOUT, True, 0.45)}
 
 
 def run_dir(model: str, variant: str = "") -> Path:

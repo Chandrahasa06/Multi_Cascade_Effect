@@ -319,7 +319,7 @@ ones; for example, `Bwd Packets/s` from `Total Backward Packets` and `Flow Durat
 `Packet Length Mean` from length totals and packet counts. Exact twins are removed; derivable
 fields are not.
 
-**Stop and estimate:** cost stop $0.50 for this run. Expected $0.05–0.10 (Haiku's A3+A5b cost
+**Stop and estimate:** hard limit $0.50 for this run. The guard trips at $0.45, so the calls already in flight when it trips (at most 8, the largest Haiku stage on eval20 cost $0.0041) cannot carry spend past $0.50. Expected $0.05–0.10 (Haiku's A3+A5b cost
 $0.0495 on eval20).
 
 **Reading the result:** if the strike-out rate stays near zero, the hypotheses were vacuous
