@@ -19,6 +19,7 @@ from agents import reference_arms as ra
 from agents import selfcheck_pipeline as sp
 from agents.prompts import selfcheck_prompts_v3 as PROMPTS
 from agents.prompts import selfcheck_prompts_v4 as PROMPTS_HOLDOUT
+from agents.prompts import selfcheck_prompts_v5 as PROMPTS_HOLDOUT_A4
 from eval import run_selfcheck as rs
 from eval.build_blind_input import load_blind_file, verify_blind_file
 from eval.record_protocols import protocols_for
@@ -30,10 +31,10 @@ RUNS = Path("results/eval20_runs")
 LEDGER = RUNS / "_spend_ledger.jsonl"
 
 
-#: variant runs: name -> (prompt module, holdout mode, per-run cost stop in USD)
-#: holdout3 trips at $0.45 so calls already in flight (at most 8, ~$0.005 each for Haiku) cannot carry
-#: spend past the $0.50 limit.
-VARIANTS = {"holdout3": (PROMPTS_HOLDOUT, True, 0.45)}
+#: variant -> (prompts, A3 hold-out, A4 hold-out, guard in USD). Guards trip at $0.45 so calls already
+#: in flight (at most 8, ~$0.005 each for Haiku) cannot carry spend past the $0.50 limit.
+VARIANTS = {"holdout3": (PROMPTS_HOLDOUT, True, False, 0.45),
+            "holdout3_a4": (PROMPTS_HOLDOUT_A4, True, True, 0.45)}
 
 
 def run_dir(model: str, variant: str = "") -> Path:
@@ -74,7 +75,8 @@ def main() -> int:
     pool = es.load_pool_slim(extra_columns=list(ra.EXTRA_POOL_COLUMNS) + keys)
     match_cols = [c for c in keys if c in pool.columns]
 
-    prompts, holdout, variant_ceiling = VARIANTS[args.variant] if args.variant else (PROMPTS, False, None)
+    prompts, holdout, holdout_a4, variant_ceiling = (VARIANTS[args.variant] if args.variant
+                                                     else (PROMPTS, False, False, None))
     sp.configure(args.model, prompts)
     d = run_dir(args.model, args.variant)
     d.mkdir(parents=True, exist_ok=True)
@@ -91,7 +93,8 @@ def main() -> int:
           f"global ${g['global_spent']:.4f} of ${g['global_ceiling']:.2f}; concurrency {concurrency}")
     return rs.run(blinds, out=d / "records.jsonl", tally_path=d / "tally.json", upstream=d / "upstream",
                   prompt_dir=d / "prompts", protocols=protocols, pool=pool, match_cols=match_cols,
-                  counts=known_counts(), dry=args.dry_run, prompts=prompts, workers=concurrency, holdout=holdout)
+                  counts=known_counts(), dry=args.dry_run, prompts=prompts, workers=concurrency, holdout=holdout,
+                  holdout_a4=holdout_a4)
 
 
 if __name__ == "__main__":

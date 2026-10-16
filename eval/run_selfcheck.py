@@ -171,7 +171,7 @@ def main() -> int:
 
 def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prompt_dir: Path, protocols: dict,
         pool, match_cols: List[str], counts: Dict[str, set], dry: bool = False, prompts=P,
-        workers: int = 1, holdout: bool = False) -> int:
+        workers: int = 1, holdout: bool = False, holdout_a4: bool = False) -> int:
     """The record loop. `sp` must already be configured for the model and prompt module.
     Returns 0, or 3 if the run was stopped (quota, provider error or a cost ceiling); where it
     stopped is recorded in the tally."""
@@ -205,6 +205,7 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
         for t in builders.values():
             check_prompt(t, t, rcounts, fvals, tmpl_numbers)
         held = hidden = ()
+        assert holdout or not holdout_a4, "A4 hold-out uses A3's held-out set"
         if holdout:
             held, hidden = ho.held_out(rid), ho.hidden_fields(rid)
             feats_a3 = ho.redact_features(shown_features(feats), hidden)
@@ -225,7 +226,11 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
                 upstream_replayed = True
             else:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as px:
-                    f4 = px.submit(sp.run_a4, rid, flow)
+                    # A4 is submitted before A1 runs and never sees chain output, in both modes
+                    if holdout_a4:
+                        f4 = px.submit(sp.run_a4_holdout, rid, flow_a3, held, hidden, list(feats_a3))
+                    else:
+                        f4 = px.submit(sp.run_a4, rid, flow)
                     (a1, metas["a1"]), prompts_used["a1"] = sp.run_a1(rid, flow)
                     (a2, metas["a2"]), prompts_used["a2"] = sp.run_a2(rid, flow, a1)
                     if holdout:
@@ -251,7 +256,8 @@ def run(blinds: List[dict], *, out: Path, tally_path: Path, upstream: Path, prom
             status = {}
             status_detail = {}
             for h in [*a3.hypotheses, *a4.hypotheses]:
-                if holdout and h.hypothesis_id.startswith("a3_"):  # A3 predicted fields it never saw
+                if (holdout and h.hypothesis_id.startswith("a3_")) or (holdout_a4 and h.hypothesis_id.startswith("a4_")):
+                    # the agent predicted fields it never saw
                     st, det = ho.holdout_status(h.predictions, row, held)
                 else:
                     st, det = core.hypothesis_status(h.predictions, row)

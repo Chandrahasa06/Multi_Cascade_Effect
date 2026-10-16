@@ -123,3 +123,44 @@ def test_holdout_choice_reads_no_label():
     src = inspect.getsource(ho)
     for word in ("eval20_records", "true_label", "is_attack", "agent_key"):
         assert word not in src
+
+
+# ---------------------------------------------------------------- A4 hold-out (v5)
+from agents.prompts import selfcheck_prompts_v5 as v5  # noqa: E402
+
+
+def test_v5_changes_only_a4_and_a5b_and_keeps_a3_identical_to_v4():
+    changed = {k for k in v4.VERSIONS if v4.VERSIONS[k] != v5.VERSIONS[k]}
+    assert changed == {"a4", "a5b"}
+    flow = v4.flow_block({"Flow Duration": 1.0}, "TCP", "10:00")
+    held = ("Flow IAT Mean", "Init_Win_bytes_backward", "min_seg_size_forward")
+    assert v5.a3(flow, "x", "y", held) == v4.a3(flow, "x", "y", held)
+    assert v5.a5b("c", "j", ["C1"]) == v3.a5b("c", "j", ["C1"])
+
+
+def test_a4_gets_the_same_rule_as_a3_and_stays_blind_to_the_chain():
+    flow = v5.flow_block({"Flow Duration": 1.0}, "TCP", "10:00")
+    held = ("Flow IAT Mean", "Init_Win_bytes_backward", "min_seg_size_forward")
+    p = v5.a4(flow, held)
+    assert v5.holdout_rule(held) in p and v5.holdout_rule(held) in v5.a3(flow, "", "", held)
+    assert "working alone" in p and "A1's claims" not in p and "A2's claims" not in p
+
+
+def test_run_a4_holdout_refuses_a_withheld_field(monkeypatch):
+    monkeypatch.setattr(sp, "P", v5)
+    monkeypatch.setattr(sp, "_call", lambda *a, **k: ("called", a[2]))
+    held = ("Bwd Packets/s", "Flow IAT Mean", "min_seg_size_forward")
+    with pytest.raises(AssertionError, match="would reach A4"):
+        sp.run_a4_holdout("r", v5.flow_block({"Flow Duration": 5.0, "Flow IAT Mean": 2.0}, "TCP", None),
+                          held, held, ["Flow Duration"])
+    (_, prompt), _ = sp.run_a4_holdout("r", v5.flow_block({"Flow Duration": 5.0}, "TCP", None), held, held,
+                                       ["Flow Duration"])
+    assert ho.leaked_fields(prompt[prompt.index("The flow:"):], held, ["Flow Duration"]) == []
+
+
+def test_a4_is_still_submitted_before_a1_in_holdout_mode():
+    from eval import run_selfcheck as rs
+    src = inspect.getsource(rs.run)
+    i4 = src.index("px.submit(sp.run_a4_holdout")
+    i1 = src.index("sp.run_a1(rid, flow)")
+    assert i4 < i1

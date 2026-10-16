@@ -181,6 +181,32 @@ def run_a3_holdout(rid, flow_redacted, a1, a2, held, hidden, visible):
     return _call(rid, "a3", prompt, SCHypothesisResponse, v), prompt
 
 
+def run_a4_holdout(rid, flow_redacted, held, hidden, visible):
+    """A4 with the same three fields withheld as A3. Still blind to the chain: its prompt is built
+    from the redacted row alone, and it is submitted before A1 runs, exactly like run_a4."""
+    from agents import holdout as ho
+
+    body = P.a4_body(flow_redacted)
+    leaks = ho.leaked_fields(body, hidden, visible)
+    assert not leaks, f"{rid}: withheld field(s) {leaks} would reach A4"
+    prompt = P.a4(flow_redacted, held)
+    assert prompt.endswith(body), "A4's record-specific text must be exactly the checked body"
+
+    def v(r):
+        errors = []
+        for check in (lambda: validate_claims(r.claims, "a4_c"), lambda: validate_absences(r.absences),
+                      lambda: validate_hypotheses(r.hypotheses, "a4_h"),
+                      lambda: ho.validate_holdout_predictions(r.hypotheses, held)):
+            try:
+                check()
+            except ValueError as exc:
+                errors.append(str(exc))
+        if errors:
+            raise ValueError("; ".join(errors))
+
+    return _call(rid, "a4", prompt, SCBlindResponse, v), prompt
+
+
 def run_a4(rid, flow):
     prompt = P.a4(flow)
 
